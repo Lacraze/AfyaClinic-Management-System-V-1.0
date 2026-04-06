@@ -185,7 +185,7 @@
     }
   },
   "firestore": {
-    "/users/{uid}": { "schema": "User", "description": "Staff user profiles" },
+    "/staff/{uid}": { "schema": "User", "description": "Staff user profiles" },
     "/patients/{patientId}": { "schema": "Patient", "description": "Patient records" },
     "/visits/{visitId}": { "schema": "Visit", "description": "Patient visit records" },
     "/drugs/{drugId}": { "schema": "Drug", "description": "Pharmacy inventory" },

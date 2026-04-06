@@ -62,7 +62,8 @@ The app will be available at `http://localhost:3000`.
 3.  Set the following build settings:
     - **Build command**: `npm run build`
     - **Publish directory**: `dist`
-4.  Add your Firebase configuration as environment variables if you prefer not to use the JSON file.
+4.  **SPA Support**: The app includes a `public/_redirects` file which is essential for Netlify to handle client-side routing correctly. This ensures that refreshing a page like `/patients` or `/signup` doesn't result in a 404 error.
+5.  **Environment Variables**: Add your Firebase configuration as environment variables in the Netlify dashboard if you prefer not to use the `firebase-applet-config.json` file.
 
 ## Security
 

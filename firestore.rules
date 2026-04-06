@@ -43,7 +43,7 @@ service cloud.firestore {
     }
 
     function getUserData() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return get(/databases/$(database)/documents/staff/$(request.auth.uid)).data;
     }
 
     function hasRole(role) {
@@ -73,9 +73,9 @@ service cloud.firestore {
     // Collection Rules
     // ===============================================================
 
-    match /users/{uid} {
+    match /staff/{uid} {
       allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && (isOwner(uid) || isAdmin());
+      allow create: if isAuthenticated(); // Allow signup
       allow update: if isAuthenticated() && (isOwner(uid) || isAdmin());
     }
 

@@ -4,6 +4,7 @@ export interface UserProfile {
   uid: string;
   email: string;
   displayName: string;
+  fullName: string;
   role: UserRole;
   status: 'active' | 'inactive';
   phoneNumber?: string;

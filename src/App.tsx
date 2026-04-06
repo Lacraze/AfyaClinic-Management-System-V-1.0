@@ -4,9 +4,11 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { ThemeProvider } from './context/ThemeContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
+import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
 import Patients from './pages/Patients';
 import PatientDetail from './pages/PatientDetail';
@@ -20,17 +22,19 @@ import Reports from './pages/Reports';
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        
-        <Route path="/" element={
-          <ProtectedRoute>
-            <Layout>
-              <Dashboard />
-            </Layout>
-          </ProtectedRoute>
-        } />
+    <ThemeProvider>
+      <Router>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          
+          <Route path="/" element={
+            <ProtectedRoute>
+              <Layout>
+                <Dashboard />
+              </Layout>
+            </ProtectedRoute>
+          } />
 
         <Route path="/patients" element={
           <ProtectedRoute allowedRoles={['admin', 'doctor', 'nurse', 'receptionist']}>
@@ -106,7 +110,8 @@ export default function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </Router>
+      </Router>
+    </ThemeProvider>
   );
 }
 

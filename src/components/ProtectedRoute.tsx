@@ -18,7 +18,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+        const userDoc = await getDoc(doc(db, 'staff', firebaseUser.uid));
         if (userDoc.exists()) {
           setUser(userDoc.data() as UserProfile);
         }
@@ -33,7 +33,7 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles 
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-gray-50">
+      <div className="flex items-center justify-center h-screen bg-gray-50 dark:bg-gray-900 transition-colors duration-200">
         <Activity className="w-12 h-12 text-blue-600 animate-pulse" />
       </div>
     );

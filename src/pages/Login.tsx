@@ -1,43 +1,53 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { auth, db } from '../firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { Activity, Mail, Lock, AlertCircle, Loader2 } from 'lucide-react';
+import { Activity, Mail, Lock, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 import { UserRole } from '../types';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.state && (location.state as any).message) {
+      setSuccessMessage((location.state as any).message);
+      // Clear state so it doesn't persist on refresh
+      window.history.replaceState({}, document.title);
+    }
+  }, [location]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccessMessage(null);
 
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Check if user profile exists in Firestore
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      // Check if user profile exists in Firestore (staff collection)
+      const userDoc = await getDoc(doc(db, 'staff', user.uid));
       
       if (!userDoc.exists()) {
         // Bootstrap the first admin if it's the specific email
         if (email === 'klacraze@gmail.com') {
-          await setDoc(doc(db, 'users', user.uid), {
+          await setDoc(doc(db, 'staff', user.uid), {
             uid: user.uid,
             email: user.email,
-            displayName: 'System Admin',
+            fullName: 'System Admin',
             role: 'admin' as UserRole,
             status: 'active',
             createdAt: serverTimestamp(),
           });
         } else {
-          // For other users, they need an admin to create their profile
           setError('Your account is not registered in the clinic system. Please contact an administrator.');
           setLoading(false);
           return;
@@ -60,33 +70,40 @@ const Login: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8 transition-colors duration-200">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
           <div className="bg-blue-600 p-3 rounded-2xl shadow-lg">
             <Activity className="w-10 h-10 text-white" />
           </div>
         </div>
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 tracking-tight">
+        <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
           AfyaClinic Management
         </h2>
-        <p className="mt-2 text-center text-sm text-gray-600">
+        <p className="mt-2 text-center text-sm text-gray-600 dark:text-gray-400">
           Sign in to access your clinic dashboard
         </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-gray-100">
+        <div className="bg-white dark:bg-gray-800 py-8 px-4 shadow-xl sm:rounded-2xl sm:px-10 border border-gray-100 dark:border-gray-700">
           <form className="space-y-6" onSubmit={handleLogin}>
+            {successMessage && (
+              <div className="bg-green-50 dark:bg-green-900/30 border-l-4 border-green-400 p-4 rounded-md flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5" />
+                <p className="text-sm text-green-700 dark:text-green-200">{successMessage}</p>
+              </div>
+            )}
+
             {error && (
-              <div className="bg-red-50 border-l-4 border-red-400 p-4 rounded-md flex items-start gap-3">
+              <div className="bg-red-50 dark:bg-red-900/30 border-l-4 border-red-400 p-4 rounded-md flex items-start gap-3">
                 <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-red-700">{error}</p>
+                <p className="text-sm text-red-700 dark:text-red-200">{error}</p>
               </div>
             )}
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Email address
               </label>
               <div className="mt-1 relative rounded-md shadow-sm">
@@ -101,14 +118,14 @@ const Login: React.FC = () => {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-all"
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-700 dark:text-white transition-all"
                   placeholder="doctor@afyaclinic.com"
                 />
               </div>
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
                 Password
               </label>
               <div className="mt-1 relative rounded-md shadow-sm">
@@ -123,7 +140,7 @@ const Login: React.FC = () => {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm transition-all"
+                  className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-700 dark:text-white transition-all"
                   placeholder="••••••••"
                 />
               </div>
@@ -147,15 +164,21 @@ const Login: React.FC = () => {
           <div className="mt-6">
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-gray-200" />
+                <div className="w-full border-t border-gray-200 dark:border-gray-700" />
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-white text-gray-500">Clinic Staff Only</span>
+                <span className="px-2 bg-white dark:bg-gray-800 text-gray-500 dark:text-gray-400">New to AfyaClinic?</span>
               </div>
             </div>
-            <p className="mt-4 text-xs text-center text-gray-400">
-              If you don't have an account, please contact your clinic administrator for registration.
-            </p>
+            
+            <div className="mt-6">
+              <Link
+                to="/signup"
+                className="w-full flex justify-center py-2.5 px-4 border border-gray-300 dark:border-gray-600 rounded-lg shadow-sm text-sm font-semibold text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
+              >
+                Create a staff account
+              </Link>
+            </div>
           </div>
         </div>
       </div>
