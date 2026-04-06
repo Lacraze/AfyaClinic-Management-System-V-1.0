@@ -1,11 +1,73 @@
-<div align="center">
+# AfyaClinic Management System
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A comprehensive, production-ready clinic management system built with React, TypeScript, and Firebase.
 
-  <h1>Built with AI Studio</h2>
+## Features
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+- **Role-Based Access Control**: Secure login for Admin, Doctors, Nurses, Receptionists, Pharmacists, and Accountants.
+- **Patient Management**: Registration, search, and detailed clinical history.
+- **Clinical Workflow**: Appointment scheduling, triage/vitals recording, and doctor encounter notes.
+- **Pharmacy & Inventory**: Drug catalog, stock tracking, and automated prescription dispensing.
+- **Billing & Payments**: Invoice generation and payment tracking (Cash, M-Pesa, Card, Insurance).
+- **Staff & HR**: Staff profiles and attendance logging.
+- **Utilities**: Tracking of monthly bills like electricity, water, and rent.
+- **Analytics**: Dashboards and reports for revenue and patient volume.
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Tech Stack
 
-</div>
+- **Frontend**: React 19, Vite, TypeScript
+- **Styling**: Tailwind CSS 4
+- **Backend**: Firebase (Authentication & Firestore)
+- **Icons**: Lucide React
+- **Animations**: Motion
+
+## Getting Started
+
+### Prerequisites
+
+- Node.js (v18+)
+- A Firebase project
+
+### Configuration
+
+1.  Create a Firebase project at [Firebase Console](https://console.firebase.google.com/).
+2.  Enable **Authentication** (Email/Password) and **Cloud Firestore**.
+3.  Copy your Firebase configuration and save it as `firebase-applet-config.json` in the root directory:
+
+```json
+{
+  "apiKey": "YOUR_API_KEY",
+  "authDomain": "YOUR_AUTH_DOMAIN",
+  "projectId": "YOUR_PROJECT_ID",
+  "storageBucket": "YOUR_STORAGE_BUCKET",
+  "messagingSenderId": "YOUR_MESSAGING_SENDER_ID",
+  "appId": "YOUR_APP_ID",
+  "firestoreDatabaseId": "(default)"
+}
+```
+
+### Local Development
+
+```bash
+npm install
+npm run dev
+```
+
+The app will be available at `http://localhost:3000`.
+
+### Deployment to Netlify
+
+1.  Push the code to a GitHub repository.
+2.  Connect the repository to Netlify.
+3.  Set the following build settings:
+    - **Build command**: `npm run build`
+    - **Publish directory**: `dist`
+4.  Add your Firebase configuration as environment variables if you prefer not to use the JSON file.
+
+## Security
+
+The system uses Firestore Security Rules to enforce role-based access. The first admin is bootstrapped using the email `klacraze@gmail.com`. Once logged in, this user can manage other staff members and their roles.
+
+## License
+
+Apache-2.0

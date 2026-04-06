@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: uid
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required, email format)
+    //   - displayName: string (optional)
+    //   - role: string (required, enum: admin, doctor, nurse, receptionist, pharmacist, accountant)
+    //   - status: string (required, enum: active, inactive)
+    //   - phoneNumber: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: patients
+    // Document ID: patientId
+    // Fields:
+    //   - id: string (required)
+    //   - fullName: string (required)
+    //   - idNumber: string (required)
+    //   - phoneNumber: string (required)
+    //   - address: string (required)
+    //   - dateOfBirth: string (required, date format)
+    //   - gender: string (required, enum: male, female, other)
+    //   - nextOfKin: string (required)
+    //   - insuranceProvider: string (optional)
+    //   - insuranceNumber: string (optional)
+    //   - createdAt: timestamp (required)
+    //
+    // [Other collections follow similar patterns]
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && getUserData().role == role;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        getUserData().role == 'admin' ||
+        (request.auth.token.email == "klacraze@gmail.com" && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isOwner(uid) || isAdmin());
+      allow update: if isAuthenticated() && (isOwner(uid) || isAdmin());
+    }
+
+    match /patients/{patientId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (hasRole('receptionist') || isAdmin());
+      allow update: if isAuthenticated() && (hasRole('receptionist') || hasRole('nurse') || hasRole('doctor') || isAdmin());
+    }
+
+    match /visits/{visitId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (hasRole('receptionist') || isAdmin());
+      allow update: if isAuthenticated();
+    }
+
+    match /drugs/{drugId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (hasRole('pharmacist') || isAdmin());
+    }
+
+    match /prescriptions/{prescriptionId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (hasRole('doctor') || isAdmin());
+      allow update: if isAuthenticated() && (hasRole('doctor') || hasRole('pharmacist') || isAdmin());
+    }
+
+    match /invoices/{invoiceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && (hasRole('accountant') || hasRole('receptionist') || isAdmin());
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (hasRole('accountant') || hasRole('receptionist') || isAdmin());
+    }
+
+    match /utilities/{utilityId} {
+      allow read, write: if isAuthenticated() && (hasRole('accountant') || isAdmin());
+    }
+
+    match /attendance/{attendanceId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.uid) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.uid);
+      allow update: if isAuthenticated() && (isOwner(resource.data.uid) || isAdmin());
+    }
+  }
+}

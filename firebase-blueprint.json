@@ -1,0 +1,198 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Staff member profile with role-based access control.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "doctor", "nurse", "receptionist", "pharmacist", "accountant"] },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "phoneNumber": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role", "status"]
+    },
+    "Patient": {
+      "title": "Patient Record",
+      "description": "Comprehensive patient demographic and insurance information.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "idNumber": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "address": { "type": "string" },
+        "dateOfBirth": { "type": "string", "format": "date" },
+        "gender": { "type": "string", "enum": ["male", "female", "other"] },
+        "nextOfKin": { "type": "string" },
+        "insuranceProvider": { "type": "string" },
+        "insuranceNumber": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "idNumber", "phoneNumber", "dateOfBirth", "gender"]
+    },
+    "Visit": {
+      "title": "Patient Visit",
+      "description": "Record of a single patient visit, including triage and encounter notes.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "patientId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["scheduled", "checked-in", "triage-completed", "doctor-encounter", "pharmacy-pending", "completed", "no-show"] },
+        "vitals": {
+          "type": "object",
+          "properties": {
+            "bp": { "type": "string" },
+            "pulse": { "type": "number" },
+            "temp": { "type": "number" },
+            "weight": { "type": "number" },
+            "height": { "type": "number" },
+            "spo2": { "type": "number" },
+            "painScore": { "type": "number" },
+            "recordedBy": { "type": "string" },
+            "recordedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "encounter": {
+          "type": "object",
+          "properties": {
+            "chiefComplaint": { "type": "string" },
+            "history": { "type": "string" },
+            "examination": { "type": "string" },
+            "diagnosis": { "type": "string" },
+            "plan": { "type": "string" },
+            "doctorId": { "type": "string" },
+            "recordedAt": { "type": "string", "format": "date-time" }
+          }
+        }
+      },
+      "required": ["patientId", "date", "status"]
+    },
+    "Drug": {
+      "title": "Drug Inventory",
+      "description": "Pharmacy inventory item.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "genericName": { "type": "string" },
+        "strength": { "type": "string" },
+        "unit": { "type": "string" },
+        "form": { "type": "string" },
+        "buyingPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "stockQuantity": { "type": "number" },
+        "reorderLevel": { "type": "number" },
+        "supplier": { "type": "string" }
+      },
+      "required": ["name", "sellingPrice", "stockQuantity"]
+    },
+    "Prescription": {
+      "title": "Prescription",
+      "description": "Medication prescribed during a visit.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "visitId": { "type": "string" },
+        "patientId": { "type": "string" },
+        "drugId": { "type": "string" },
+        "drugName": { "type": "string" },
+        "dosage": { "type": "string" },
+        "frequency": { "type": "string" },
+        "duration": { "type": "string" },
+        "instructions": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "totalCost": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "dispensed", "cancelled"] },
+        "prescribedBy": { "type": "string" },
+        "prescribedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["visitId", "patientId", "drugId", "quantity", "status"]
+    },
+    "Invoice": {
+      "title": "Billing Invoice",
+      "description": "Invoice for services and drugs provided.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "patientId": { "type": "string" },
+        "visitId": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "description": { "type": "string" },
+              "quantity": { "type": "number" },
+              "unitPrice": { "type": "number" },
+              "total": { "type": "number" }
+            }
+          }
+        },
+        "subtotal": { "type": "number" },
+        "tax": { "type": "number" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["unpaid", "partially-paid", "paid"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["patientId", "visitId", "total", "status"]
+    },
+    "Payment": {
+      "title": "Payment Record",
+      "description": "Record of payment received.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "amount": { "type": "number" },
+        "method": { "type": "string", "enum": ["cash", "mpesa", "card", "insurance"] },
+        "reference": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" }
+      },
+      "required": ["invoiceId", "amount", "method", "date"]
+    },
+    "Utility": {
+      "title": "Utility Bill",
+      "description": "Monthly utility bill tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["electricity", "water", "internet", "rent", "other"] },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["unpaid", "paid"] },
+        "notes": { "type": "string" }
+      },
+      "required": ["type", "amount", "dueDate", "status"]
+    },
+    "Attendance": {
+      "title": "Staff Attendance",
+      "description": "Staff clock-in/out records.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "clockIn": { "type": "string", "format": "date-time" },
+        "clockOut": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "date", "clockIn"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "Staff user profiles" },
+    "/patients/{patientId}": { "schema": "Patient", "description": "Patient records" },
+    "/visits/{visitId}": { "schema": "Visit", "description": "Patient visit records" },
+    "/drugs/{drugId}": { "schema": "Drug", "description": "Pharmacy inventory" },
+    "/prescriptions/{prescriptionId}": { "schema": "Prescription", "description": "Medication prescriptions" },
+    "/invoices/{invoiceId}": { "schema": "Invoice", "description": "Billing invoices" },
+    "/payments/{paymentId}": { "schema": "Payment", "description": "Payment records" },
+    "/utilities/{utilityId}": { "schema": "Utility", "description": "Utility bills" },
+    "/attendance/{attendanceId}": { "schema": "Attendance", "description": "Staff attendance logs" }
+  }
+}
