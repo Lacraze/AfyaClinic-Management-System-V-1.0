@@ -73,11 +73,19 @@ const Dashboard: React.FC = () => {
       }
     );
 
+    const appointmentsUnsub = onSnapshot(
+      query(collection(db, 'visits'), where('status', '==', 'scheduled')),
+      (snapshot) => {
+        setStats(prev => ({ ...prev, pendingAppointments: snapshot.size }));
+      }
+    );
+
     return () => {
       patientsUnsub();
       visitsUnsub();
       drugsUnsub();
       recentVisitsUnsub();
+      appointmentsUnsub();
     };
   }, []);
 
@@ -174,14 +182,15 @@ const Dashboard: React.FC = () => {
                     <p className="text-xs text-gray-500 dark:text-gray-400">{format(new Date(visit.date), 'PPpp')}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <span className={cn(
-                      "px-2.5 py-0.5 rounded-full text-xs font-medium capitalize",
-                      visit.status === 'completed' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" :
-                      visit.status === 'scheduled' ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400" :
-                      "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
-                    )}>
-                      {visit.status.replace('-', ' ')}
-                    </span>
+                      <span className={cn(
+                        "px-2.5 py-0.5 rounded-full text-xs font-medium capitalize",
+                        visit.status === 'completed' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" :
+                        visit.status === 'scheduled' ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400" :
+                        visit.status === 'no-show' ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
+                        "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+                      )}>
+                        {visit.status.replace('-', ' ')}
+                      </span>
                   </div>
                 </div>
               ))

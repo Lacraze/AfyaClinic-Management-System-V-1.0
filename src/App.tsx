@@ -20,6 +20,7 @@ import Staff from './pages/Staff';
 import ManageStaff from './pages/ManageStaff';
 import Utilities from './pages/Utilities';
 import Reports from './pages/Reports';
+import VisitWorkflow from './pages/VisitWorkflow';
 
 export default function App() {
   return (
@@ -49,6 +50,14 @@ export default function App() {
           <ProtectedRoute allowedRoles={['admin', 'doctor', 'nurse', 'receptionist']}>
             <Layout>
               <PatientDetail />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/visits/:visitId/workflow" element={
+          <ProtectedRoute allowedRoles={['admin', 'doctor', 'nurse', 'receptionist', 'accountant']}>
+            <Layout>
+              <VisitWorkflow />
             </Layout>
           </ProtectedRoute>
         } />

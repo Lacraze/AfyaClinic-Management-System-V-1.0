@@ -129,7 +129,7 @@ const Appointments: React.FC = () => {
                     </div>
                     <div className="flex gap-2">
                       <button 
-                        onClick={() => updateStatus(visit.id, 'checked-in')}
+                        onClick={() => updateStatus(visit.id, 'vitals')}
                         className="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs font-bold hover:bg-green-100 transition-all"
                       >
                         Check-in
@@ -165,6 +165,7 @@ const Appointments: React.FC = () => {
                       "flex-1 p-3 rounded-xl border-l-4",
                       v.status === 'completed' ? "bg-green-50 border-green-500" :
                       v.status === 'scheduled' ? "bg-blue-50 border-blue-500" :
+                      v.status === 'no-show' ? "bg-red-50 border-red-500" :
                       "bg-amber-50 border-amber-500"
                     )}>
                       <p className="text-xs font-bold text-gray-900">{getPatientName(v.patientId)}</p>

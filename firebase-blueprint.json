@@ -42,7 +42,7 @@
         "id": { "type": "string" },
         "patientId": { "type": "string" },
         "date": { "type": "string", "format": "date-time" },
-        "status": { "type": "string", "enum": ["scheduled", "checked-in", "triage-completed", "doctor-encounter", "pharmacy-pending", "completed", "no-show"] },
+        "status": { "type": "string", "enum": ["scheduled", "checked-in", "vitals", "history", "encounter", "billing", "completed", "no-show"] },
         "vitals": {
           "type": "object",
           "properties": {
@@ -57,11 +57,21 @@
             "recordedAt": { "type": "string", "format": "date-time" }
           }
         },
-        "encounter": {
+        "history": {
           "type": "object",
           "properties": {
             "chiefComplaint": { "type": "string" },
-            "history": { "type": "string" },
+            "hpi": { "type": "string" },
+            "pmh": { "type": "string" },
+            "socialHistory": { "type": "string" },
+            "familyHistory": { "type": "string" },
+            "recordedBy": { "type": "string" },
+            "recordedAt": { "type": "string", "format": "date-time" }
+          }
+        },
+        "encounter": {
+          "type": "object",
+          "properties": {
             "examination": { "type": "string" },
             "diagnosis": { "type": "string" },
             "plan": { "type": "string" },

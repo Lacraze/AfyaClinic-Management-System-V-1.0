@@ -74,14 +74,16 @@ const PatientDetail: React.FC = () => {
       const docRef = await addDoc(collection(db, 'visits'), {
         patientId: id,
         date: new Date().toISOString(),
-        status: 'checked-in',
+        status: 'vitals',
         createdAt: serverTimestamp()
       });
-      // Optionally navigate to visit detail or show success
+      navigate(`/visits/${docRef.id}/workflow`);
     } catch (error) {
       console.error('Error creating visit:', error);
     }
   };
+
+  const activeVisit = visits.find(v => v.status !== 'completed');
 
   if (loading) {
     return (
@@ -140,13 +142,23 @@ const PatientDetail: React.FC = () => {
             </div>
           </div>
 
-          <button
-            onClick={handleCreateVisit}
-            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-sm"
-          >
-            <Plus className="w-5 h-5" />
-            Check-in for Visit
-          </button>
+          {activeVisit ? (
+            <button
+              onClick={() => navigate(`/visits/${activeVisit.id}/workflow`)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-orange-600 text-white rounded-xl font-semibold hover:bg-orange-700 transition-all shadow-sm"
+            >
+              <Activity className="w-5 h-5" />
+              Continue Active Visit
+            </button>
+          ) : (
+            <button
+              onClick={handleCreateVisit}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 transition-all shadow-sm"
+            >
+              <Plus className="w-5 h-5" />
+              Check-in for Visit
+            </button>
+          )}
         </div>
 
         {/* Tabs and Content */}
@@ -193,6 +205,12 @@ const PatientDetail: React.FC = () => {
                             {visit.status.replace('-', ' ')}
                           </span>
                         </div>
+                        {visit.history && (
+                          <div className="mt-3 p-3 bg-gray-50 rounded-lg text-sm text-gray-600">
+                            <p className="font-bold text-gray-400 uppercase text-[10px] mb-1">Chief Complaint</p>
+                            {visit.history.chiefComplaint}
+                          </div>
+                        )}
                         {visit.vitals && (
                           <div className="flex items-center gap-4 text-xs text-gray-500 mt-2">
                             <span className="flex items-center gap-1"><Thermometer className="w-3 h-3" /> {visit.vitals.temp}°C</span>
@@ -254,7 +272,7 @@ const PatientDetail: React.FC = () => {
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                           <p className="text-xs font-bold text-gray-400 uppercase mb-1">Chief Complaint</p>
-                          <p className="text-sm text-gray-700">{visit.encounter?.chiefComplaint}</p>
+                          <p className="text-sm text-gray-700">{visit.history?.chiefComplaint}</p>
                         </div>
                         <div>
                           <p className="text-xs font-bold text-gray-400 uppercase mb-1">Diagnosis</p>

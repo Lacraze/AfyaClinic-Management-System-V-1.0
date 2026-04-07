@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, getDoc, doc } from 'firebase/firestore';
 import { 
   Receipt, 
   Search, 
@@ -15,18 +16,21 @@ import {
   Filter,
   ArrowUpRight,
   ArrowDownRight,
-  FileText
+  FileText,
+  ChevronRight
 } from 'lucide-react';
-import { Invoice, Payment } from '../types';
+import { Invoice, Payment, Visit } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
 
 const Billing: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [pendingVisits, setPendingVisits] = useState<(Visit & { patientName: string })[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'invoices' | 'payments'>('invoices');
+  const [activeTab, setActiveTab] = useState<'invoices' | 'payments' | 'pending'>('invoices');
+  const navigate = useNavigate();
 
   useEffect(() => {
     const invoicesUnsub = onSnapshot(query(collection(db, 'invoices'), orderBy('createdAt', 'desc')), (snapshot) => {
@@ -38,9 +42,19 @@ const Billing: React.FC = () => {
       setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
     });
 
+    const pendingVisitsUnsub = onSnapshot(query(collection(db, 'visits'), where('status', '==', 'billing')), async (snapshot) => {
+      const visits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
+      const visitsWithNames = await Promise.all(visits.map(async (v) => {
+        const patientDoc = await getDoc(doc(db, 'patients', v.patientId));
+        return { ...v, patientName: patientDoc.exists() ? patientDoc.data().fullName : 'Unknown' };
+      }));
+      setPendingVisits(visitsWithNames);
+    });
+
     return () => {
       invoicesUnsub();
       paymentsUnsub();
+      pendingVisitsUnsub();
     };
   }, []);
 
@@ -125,6 +139,20 @@ const Billing: React.FC = () => {
           )}
         >
           Invoices
+        </button>
+        <button
+          onClick={() => setActiveTab('pending')}
+          className={cn(
+            "px-6 py-3 text-sm font-medium transition-all border-b-2",
+            activeTab === 'pending' ? "border-blue-600 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
+          )}
+        >
+          Pending Billing
+          {pendingVisits.length > 0 && (
+            <span className="ml-2 px-2 py-0.5 bg-red-100 text-red-600 rounded-full text-[10px] font-bold">
+              {pendingVisits.length}
+            </span>
+          )}
         </button>
         <button
           onClick={() => setActiveTab('payments')}
@@ -214,6 +242,52 @@ const Billing: React.FC = () => {
             <div className="p-12 text-center text-gray-500">
               <Receipt className="w-12 h-12 mx-auto mb-4 opacity-20" />
               <p>No invoices found.</p>
+            </div>
+          )
+        ) : activeTab === 'pending' ? (
+          pendingVisits.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100">
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Patient</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Visit Date</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Status</th>
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {pendingVisits.map((visit) => (
+                    <tr key={visit.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <p className="text-sm font-semibold text-gray-900">{visit.patientName}</p>
+                        <p className="text-xs text-gray-500">ID: {visit.patientId.slice(0, 8)}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-sm text-gray-600">{format(new Date(visit.date), 'PP p')}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 uppercase">
+                          Ready for Billing
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button 
+                          onClick={() => navigate(`/visits/${visit.id}/workflow`)}
+                          className="text-sm font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 justify-end ml-auto"
+                        >
+                          Generate Invoice <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="p-12 text-center text-gray-500">
+              <Receipt className="w-12 h-12 mx-auto mb-4 opacity-20" />
+              <p>No visits pending billing.</p>
             </div>
           )
         ) : (

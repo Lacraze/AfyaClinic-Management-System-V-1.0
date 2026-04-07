@@ -37,9 +37,17 @@ export interface Vitals {
   recordedAt: string;
 }
 
-export interface Encounter {
+export interface History {
   chiefComplaint: string;
-  history: string;
+  hpi: string;
+  pmh: string;
+  socialHistory: string;
+  familyHistory: string;
+  recordedBy: string;
+  recordedAt: string;
+}
+
+export interface Encounter {
   examination: string;
   diagnosis: string;
   plan: string;
@@ -51,8 +59,9 @@ export interface Visit {
   id: string;
   patientId: string;
   date: string;
-  status: 'scheduled' | 'checked-in' | 'triage-completed' | 'doctor-encounter' | 'pharmacy-pending' | 'completed' | 'no-show';
+  status: 'scheduled' | 'checked-in' | 'vitals' | 'history' | 'encounter' | 'billing' | 'completed' | 'no-show';
   vitals?: Vitals;
+  history?: History;
   encounter?: Encounter;
 }
 
