@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { auth, db } from '../firebase';
-import { signOut, onAuthStateChanged } from 'firebase/auth';
+import { logOut, db, auth } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
@@ -11,6 +11,7 @@ import {
   Pill, 
   Receipt, 
   UserCog, 
+  Shield,
   Zap, 
   BarChart3, 
   LogOut,
@@ -39,7 +40,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'staff', firebaseUser.uid));
+        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
         if (userDoc.exists()) {
           setUser(userDoc.data() as UserProfile);
         }
@@ -54,18 +55,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   }, [navigate]);
 
   const handleLogout = async () => {
-    await signOut(auth);
+    await logOut();
     navigate('/login');
   };
 
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'accountant'] },
+    { name: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'accountant', 'lab_tech', 'hr'] },
     { name: 'Patients', path: '/patients', icon: Users, roles: ['admin', 'doctor', 'nurse', 'receptionist'] },
     { name: 'Appointments', path: '/appointments', icon: Calendar, roles: ['admin', 'doctor', 'nurse', 'receptionist'] },
     { name: 'Clinical Notes', path: '/clinical', icon: ClipboardList, roles: ['admin', 'doctor', 'nurse'] },
     { name: 'Pharmacy', path: '/pharmacy', icon: Pill, roles: ['admin', 'pharmacist', 'doctor'] },
     { name: 'Billing', path: '/billing', icon: Receipt, roles: ['admin', 'accountant', 'receptionist'] },
-    { name: 'Staff', path: '/staff', icon: UserCog, roles: ['admin'] },
+    { name: 'Manage Staff', path: '/manage-staff', icon: Shield, roles: ['admin'] },
+    { name: 'Staff List', path: '/staff', icon: UserCog, roles: ['admin', 'hr'] },
     { name: 'Utilities', path: '/utilities', icon: Zap, roles: ['admin', 'accountant'] },
     { name: 'Reports', path: '/reports', icon: BarChart3, roles: ['admin', 'accountant'] },
   ];

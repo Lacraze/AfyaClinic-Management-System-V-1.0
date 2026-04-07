@@ -34,7 +34,7 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     const fetchUser = async () => {
       if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'staff', auth.currentUser.uid));
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
           setUser(userDoc.data() as UserProfile);
         }

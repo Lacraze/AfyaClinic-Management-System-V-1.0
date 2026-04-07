@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../firebase';
+import { signupWithEmailPassword } from '../firebase';
 import { UserRole } from '../types';
 import { Stethoscope, Loader2, AlertCircle } from 'lucide-react';
 
@@ -10,7 +8,7 @@ const Signup: React.FC = () => {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState<UserRole>('nurse');
+  const [role, setRole] = useState<UserRole>('receptionist');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -21,23 +19,17 @@ const Signup: React.FC = () => {
     setError(null);
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-
-      // Save staff profile to Firestore
-      await setDoc(doc(db, 'staff', user.uid), {
-        uid: user.uid,
-        fullName,
-        email,
-        role,
-        status: 'active',
-        createdAt: serverTimestamp(),
-      });
-
+      await signupWithEmailPassword(email, password, fullName);
       navigate('/login', { state: { message: 'Account created successfully! Please log in.' } });
     } catch (err: any) {
       console.error('Signup error:', err);
-      setError(err.message || 'Failed to create account. Please try again.');
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Email/password sign-in is not enabled. Please contact the system administrator.');
+      } else if (err.code === 'auth/email-already-in-use') {
+        setError('An account with this email already exists. Please sign in instead.');
+      } else {
+        setError(err.message || 'An unexpected error occurred. Please try again.');
+      }
     } finally {
       setLoading(false);
     }

@@ -17,6 +17,7 @@ import ClinicalNotes from './pages/ClinicalNotes';
 import Pharmacy from './pages/Pharmacy';
 import Billing from './pages/Billing';
 import Staff from './pages/Staff';
+import ManageStaff from './pages/ManageStaff';
 import Utilities from './pages/Utilities';
 import Reports from './pages/Reports';
 
@@ -84,8 +85,16 @@ export default function App() {
           </ProtectedRoute>
         } />
 
-        <Route path="/staff" element={
+        <Route path="/manage-staff" element={
           <ProtectedRoute allowedRoles={['admin']}>
+            <Layout>
+              <ManageStaff />
+            </Layout>
+          </ProtectedRoute>
+        } />
+        
+        <Route path="/staff" element={
+          <ProtectedRoute allowedRoles={['admin', 'hr']}>
             <Layout>
               <Staff />
             </Layout>
