@@ -14,7 +14,7 @@ import {
   PlusCircle,
   ChevronRight
 } from 'lucide-react';
-import { Patient, Visit, Drug, UserProfile } from '../types';
+import { Patient, Visit, InventoryItem, UserProfile } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
@@ -57,9 +57,9 @@ const Dashboard: React.FC = () => {
       }
     );
 
-    const drugsUnsub = onSnapshot(collection(db, 'drugs'), (snapshot) => {
+    const drugsUnsub = onSnapshot(query(collection(db, 'inventory'), where('type', '==', 'drug')), (snapshot) => {
       const lowStock = snapshot.docs.filter(doc => {
-        const drug = doc.data() as Drug;
+        const drug = doc.data() as InventoryItem;
         return drug.stockQuantity <= drug.reorderLevel;
       }).length;
       setStats(prev => ({ ...prev, lowStockDrugs: lowStock }));

@@ -19,7 +19,8 @@ import {
   X,
   Activity,
   Sun,
-  Moon
+  Moon,
+  Package
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../types';
 import { cn } from '../lib/utils';
@@ -63,6 +64,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'accountant', 'lab_tech', 'hr'] },
     { name: 'Patients', path: '/patients', icon: Users, roles: ['admin', 'doctor', 'nurse', 'receptionist'] },
     { name: 'Appointments', path: '/appointments', icon: Calendar, roles: ['admin', 'doctor', 'nurse', 'receptionist'] },
+    { name: 'Inventory', path: '/inventory', icon: Package, roles: ['admin', 'pharmacist', 'nurse', 'doctor', 'receptionist', 'accountant'] },
     { name: 'Clinical Notes', path: '/clinical', icon: ClipboardList, roles: ['admin', 'doctor', 'nurse'] },
     { name: 'Pharmacy', path: '/pharmacy', icon: Pill, roles: ['admin', 'pharmacist', 'doctor'] },
     { name: 'Billing', path: '/billing', icon: Receipt, roles: ['admin', 'accountant', 'receptionist'] },

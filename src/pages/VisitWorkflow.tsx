@@ -21,7 +21,7 @@ import {
   Plus,
   Trash2
 } from 'lucide-react';
-import { Visit, Patient, Vitals, History, Encounter, UserProfile, Drug } from '../types';
+import { Visit, Patient, Vitals, History, Encounter, UserProfile, InventoryItem } from '../types';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 
@@ -40,7 +40,7 @@ const VisitWorkflow: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [drugs, setDrugs] = useState<Drug[]>([]);
+  const [drugs, setDrugs] = useState<InventoryItem[]>([]);
 
   // Form states
   const [vitalsForm, setVitalsForm] = useState<Partial<Vitals>>({});
@@ -70,8 +70,8 @@ const VisitWorkflow: React.FC = () => {
           }
 
           // Fetch drugs for billing/prescriptions
-          const drugsSnapshot = await getDocs(collection(db, 'drugs'));
-          setDrugs(drugsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Drug)));
+          const drugsSnapshot = await getDocs(query(collection(db, 'inventory'), where('type', '==', 'drug')));
+          setDrugs(drugsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
         } else {
           navigate('/patients');
         }

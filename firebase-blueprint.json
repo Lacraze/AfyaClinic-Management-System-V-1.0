@@ -82,24 +82,27 @@
       },
       "required": ["patientId", "date", "status"]
     },
-    "Drug": {
-      "title": "Drug Inventory",
-      "description": "Pharmacy inventory item.",
+    "InventoryItem": {
+      "title": "Inventory Item",
+      "description": "Drugs, equipment, and other clinic supplies.",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "name": { "type": "string" },
         "genericName": { "type": "string" },
         "strength": { "type": "string" },
-        "unit": { "type": "string" },
         "form": { "type": "string" },
-        "buyingPrice": { "type": "number" },
-        "sellingPrice": { "type": "number" },
+        "batchNumber": { "type": "string" },
+        "expiryDate": { "type": "string", "format": "date" },
         "stockQuantity": { "type": "number" },
         "reorderLevel": { "type": "number" },
-        "supplier": { "type": "string" }
+        "supplier": { "type": "string" },
+        "type": { "type": "string", "enum": ["drug", "equipment", "other"] },
+        "buyingPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "unit": { "type": "string" }
       },
-      "required": ["name", "sellingPrice", "stockQuantity"]
+      "required": ["name", "stockQuantity", "type"]
     },
     "Prescription": {
       "title": "Prescription",
@@ -198,7 +201,7 @@
     "/staff/{uid}": { "schema": "User", "description": "Staff user profiles" },
     "/patients/{patientId}": { "schema": "Patient", "description": "Patient records" },
     "/visits/{visitId}": { "schema": "Visit", "description": "Patient visit records" },
-    "/drugs/{drugId}": { "schema": "Drug", "description": "Pharmacy inventory" },
+    "/inventory/{itemId}": { "schema": "InventoryItem", "description": "Clinic inventory" },
     "/prescriptions/{prescriptionId}": { "schema": "Prescription", "description": "Medication prescriptions" },
     "/invoices/{invoiceId}": { "schema": "Invoice", "description": "Billing invoices" },
     "/payments/{paymentId}": { "schema": "Payment", "description": "Payment records" },

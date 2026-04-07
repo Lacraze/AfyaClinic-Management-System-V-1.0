@@ -31,7 +31,23 @@ service cloud.firestore {
     //   - insuranceNumber: string (optional)
     //   - createdAt: timestamp (required)
     //
-    // [Other collections follow similar patterns]
+    // Collection: inventory
+    // Document ID: itemId
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - genericName: string (optional)
+    //   - strength: string (optional)
+    //   - form: string (optional)
+    //   - batchNumber: string (optional)
+    //   - expiryDate: string (optional, date format)
+    //   - stockQuantity: number (required)
+    //   - reorderLevel: number (required)
+    //   - supplier: string (optional)
+    //   - type: string (required, enum: drug, equipment, other)
+    //   - buyingPrice: number (required)
+    //   - sellingPrice: number (required)
+    //   - unit: string (optional)
     //
     // ===============================================================
 
@@ -91,9 +107,10 @@ service cloud.firestore {
       allow update: if isAuthenticated();
     }
 
-    match /drugs/{drugId} {
+    match /inventory/{itemId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && (hasRole('pharmacist') || isAdmin());
+      allow create, update: if isAuthenticated() && (hasRole('pharmacist') || hasRole('nurse') || hasRole('doctor') || isAdmin());
+      allow delete: if isAdmin();
     }
 
     match /prescriptions/{prescriptionId} {

@@ -21,6 +21,7 @@ import ManageStaff from './pages/ManageStaff';
 import Utilities from './pages/Utilities';
 import Reports from './pages/Reports';
 import VisitWorkflow from './pages/VisitWorkflow';
+import Inventory from './pages/Inventory';
 
 export default function App() {
   return (
@@ -122,6 +123,14 @@ export default function App() {
           <ProtectedRoute allowedRoles={['admin', 'accountant']}>
             <Layout>
               <Reports />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/inventory" element={
+          <ProtectedRoute allowedRoles={['admin', 'pharmacist', 'nurse', 'doctor', 'receptionist', 'accountant']}>
+            <Layout>
+              <Inventory />
             </Layout>
           </ProtectedRoute>
         } />

@@ -65,18 +65,21 @@ export interface Visit {
   encounter?: Encounter;
 }
 
-export interface Drug {
+export interface InventoryItem {
   id: string;
   name: string;
   genericName?: string;
-  strength: string;
-  unit: string;
-  form: string;
-  buyingPrice: number;
-  sellingPrice: number;
+  strength?: string;
+  form?: string;
+  batchNumber?: string;
+  expiryDate?: string;
   stockQuantity: number;
   reorderLevel: number;
   supplier?: string;
+  type: 'drug' | 'equipment' | 'other';
+  buyingPrice: number;
+  sellingPrice: number;
+  unit?: string;
 }
 
 export interface Prescription {

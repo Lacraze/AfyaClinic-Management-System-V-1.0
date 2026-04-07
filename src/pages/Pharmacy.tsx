@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, where } from 'firebase/firestore';
 import { 
   Pill, 
   Search, 
@@ -17,12 +17,12 @@ import {
   ArrowUpCircle,
   ClipboardList
 } from 'lucide-react';
-import { Drug, Prescription } from '../types';
+import { InventoryItem, Prescription } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
 
 const Pharmacy: React.FC = () => {
-  const [drugs, setDrugs] = useState<Drug[]>([]);
+  const [drugs, setDrugs] = useState<InventoryItem[]>([]);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -41,12 +41,15 @@ const Pharmacy: React.FC = () => {
     sellingPrice: 0,
     stockQuantity: 0,
     reorderLevel: 10,
-    supplier: ''
+    supplier: '',
+    type: 'drug' as InventoryItem['type'],
+    batchNumber: '',
+    expiryDate: ''
   });
 
   useEffect(() => {
-    const drugsUnsub = onSnapshot(query(collection(db, 'drugs'), orderBy('name', 'asc')), (snapshot) => {
-      setDrugs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Drug)));
+    const drugsUnsub = onSnapshot(query(collection(db, 'inventory'), where('type', '==', 'drug'), orderBy('name', 'asc')), (snapshot) => {
+      setDrugs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
       setLoading(false);
     });
 
@@ -69,7 +72,7 @@ const Pharmacy: React.FC = () => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'drugs'), {
+      await addDoc(collection(db, 'inventory'), {
         ...formData,
         createdAt: serverTimestamp()
       });
@@ -84,7 +87,10 @@ const Pharmacy: React.FC = () => {
         sellingPrice: 0,
         stockQuantity: 0,
         reorderLevel: 10,
-        supplier: ''
+        supplier: '',
+        type: 'drug',
+        batchNumber: '',
+        expiryDate: ''
       });
     } catch (error) {
       console.error('Error adding drug:', error);
@@ -102,7 +108,7 @@ const Pharmacy: React.FC = () => {
       });
 
       // Reduce stock
-      const drugRef = doc(db, 'drugs', prescription.drugId);
+      const drugRef = doc(db, 'inventory', prescription.drugId);
       const drug = drugs.find(d => d.id === prescription.drugId);
       if (drug) {
         await updateDoc(drugRef, {
@@ -404,6 +410,25 @@ const Pharmacy: React.FC = () => {
                     onChange={(e) => setFormData({...formData, form: e.target.value})}
                     className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
                     placeholder="Tablet"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Batch Number</label>
+                  <input
+                    type="text"
+                    value={formData.batchNumber}
+                    onChange={(e) => setFormData({...formData, batchNumber: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    placeholder="BN-001"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Expiry Date</label>
+                  <input
+                    type="date"
+                    value={formData.expiryDate}
+                    onChange={(e) => setFormData({...formData, expiryDate: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
                   />
                 </div>
                 <div>
