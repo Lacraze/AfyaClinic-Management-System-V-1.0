@@ -20,11 +20,13 @@ import {
   Activity,
   Sun,
   Moon,
-  Package
+  Package,
+  UserPlus
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../types';
 import { cn } from '../lib/utils';
 import { useTheme } from '../context/ThemeContext';
+import { collection, query, limit, onSnapshot, updateDoc } from 'firebase/firestore';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -34,6 +36,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [activeStaff, setActiveStaff] = useState<UserProfile[]>([]);
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
@@ -54,6 +57,31 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
 
     return () => unsubscribe();
   }, [navigate]);
+
+  useEffect(() => {
+    const bootstrapAdmin = async () => {
+      if (user && user.email === 'klacraze@gmail.com' && user.role !== 'admin') {
+        try {
+          await updateDoc(doc(db, 'users', user.uid), { role: 'admin' });
+          setUser(prev => prev ? { ...prev, role: 'admin' } : null);
+        } catch (err) {
+          console.error('Admin bootstrap failed:', err);
+        }
+      }
+    };
+    bootstrapAdmin();
+
+    if (user?.role === 'admin') {
+      const q = query(collection(db, 'users'), limit(5));
+      const unsub = onSnapshot(q, (snapshot) => {
+        setActiveStaff(snapshot.docs
+          .map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile))
+          .filter(u => u.uid !== user.uid)
+        );
+      });
+      return () => unsub();
+    }
+  }, [user]);
 
   const handleLogout = async () => {
     await logOut();
@@ -131,23 +159,59 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             ))}
           </nav>
 
-          <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex items-center gap-3 px-4 py-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-700 dark:text-blue-400 font-bold">
-                {user?.fullName?.charAt(0) || user?.email?.charAt(0)}
+          <div className="p-4 border-t border-gray-200 dark:border-gray-700 space-y-4">
+            <div className="px-4 text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Active Sessions</div>
+            
+            <div className="space-y-2">
+              {/* Current User (Admin) */}
+              <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50">
+                <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm ring-2 ring-blue-100 dark:ring-blue-900/50">
+                  {user?.fullName?.charAt(0) || user?.email?.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-gray-900 dark:text-white truncate leading-tight">{user?.fullName || user?.email}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                    <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-tighter">Admin Session</p>
+                  </div>
+                </div>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{user?.fullName || user?.email}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{user?.role}</p>
-              </div>
+
+              {/* Other Active Sessions */}
+              {activeStaff.map(staff => (
+                <div key={staff.uid} className="flex items-center gap-3 px-4 py-2 opacity-60 hover:opacity-100 transition-all cursor-default group">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 font-bold text-xs group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
+                    {staff.fullName?.charAt(0) || staff.email.charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{staff.fullName || staff.email}</p>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 capitalize">{staff.role.replace('_', ' ')}</p>
+                  </div>
+                </div>
+              ))}
             </div>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-3 w-full px-4 py-3 rounded-lg text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-            >
-              <LogOut className="w-5 h-5" />
-              Logout
-            </button>
+
+            <div className="pt-2 space-y-1">
+              <button 
+                onClick={() => navigate('/signup')}
+                className="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 hover:text-blue-600 dark:hover:text-blue-400 transition-all group"
+              >
+                <div className="p-1.5 rounded-lg bg-gray-100 dark:bg-gray-700 group-hover:bg-blue-100 dark:group-hover:bg-blue-900/30 transition-colors">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                Add Account
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-3 w-full px-4 py-2.5 rounded-xl text-sm font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all group"
+              >
+                <div className="p-1.5 rounded-lg bg-red-50 dark:bg-red-900/30 group-hover:bg-red-100 dark:group-hover:bg-red-900/50 transition-colors">
+                  <LogOut className="w-4 h-4" />
+                </div>
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </aside>

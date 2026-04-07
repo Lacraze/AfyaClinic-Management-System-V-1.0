@@ -13,13 +13,24 @@ const Signup: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  const roleDescriptions: Record<UserRole, string> = {
+    admin: 'Full system access, staff management, and clinical oversight.',
+    doctor: 'Clinical encounters, prescriptions, and patient history.',
+    nurse: 'Vitals recording, patient history, and clinical support.',
+    receptionist: 'Patient registration, appointments, and billing.',
+    pharmacist: 'Drug inventory management and prescription dispensing.',
+    accountant: 'Financial management, billing, and utility tracking.',
+    lab_tech: 'Laboratory tests and results management.',
+    hr: 'Staff records and human resources management.'
+  };
+
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
 
     try {
-      await signupWithEmailPassword(email, password, fullName);
+      await signupWithEmailPassword(email, password, fullName, role);
       navigate('/login', { state: { message: 'Account created successfully! Please log in.' } });
     } catch (err: any) {
       console.error('Signup error:', err);
@@ -117,8 +128,13 @@ const Signup: React.FC = () => {
                   <option value="receptionist">Receptionist</option>
                   <option value="pharmacist">Pharmacist</option>
                   <option value="accountant">Accountant</option>
+                  <option value="lab_tech">Lab Technician</option>
+                  <option value="hr">Human Resources</option>
                 </select>
               </div>
+              <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 italic">
+                {roleDescriptions[role]}
+              </p>
             </div>
 
             <div>

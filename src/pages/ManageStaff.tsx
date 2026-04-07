@@ -23,6 +23,17 @@ const ManageStaff: React.FC = () => {
   const [updatingUid, setUpdatingUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const roleDescriptions: Record<UserRole, string> = {
+    admin: 'Full system access, staff management, and clinical oversight.',
+    doctor: 'Clinical encounters, prescriptions, and patient history.',
+    nurse: 'Vitals recording, patient history, and clinical support.',
+    receptionist: 'Patient registration, appointments, and billing.',
+    pharmacist: 'Drug inventory management and prescription dispensing.',
+    accountant: 'Financial management, billing, and utility tracking.',
+    lab_tech: 'Laboratory tests and results management.',
+    hr: 'Staff records and human resources management.'
+  };
+
   useEffect(() => {
     const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -105,6 +116,25 @@ const ManageStaff: React.FC = () => {
           <p className="text-sm text-red-700 dark:text-red-200">{error}</p>
         </div>
       )}
+
+      {/* Role Reference */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {roles.map(role => (
+          <div key={role} className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="p-1.5 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                <Shield className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white capitalize">
+                {role.replace('_', ' ')}
+              </h3>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              {roleDescriptions[role]}
+            </p>
+          </div>
+        ))}
+      </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
         <div className="p-4 border-b border-gray-100 dark:border-gray-700 flex flex-col sm:flex-row gap-4">
