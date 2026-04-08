@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, where, getDocs } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { collection, query, orderBy, onSnapshot, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -26,8 +26,13 @@ const Reports: React.FC = () => {
 
   useEffect(() => {
     const fetchData = async () => {
+      if (!auth.currentUser) return;
+      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      if (!userDoc.exists()) return;
+      const facilityId = userDoc.data().facilityId || 'main-branch';
+
       // Fetch payments for revenue
-      const paymentsSnap = await getDocs(query(collection(db, 'payments'), orderBy('date', 'asc')));
+      const paymentsSnap = await getDocs(query(collection(db, 'payments'), where('facilityId', '==', facilityId), orderBy('date', 'asc')));
       const payments = paymentsSnap.docs.map(doc => doc.data());
       
       // Group by month
@@ -40,7 +45,7 @@ const Reports: React.FC = () => {
       setRevenueData(Object.entries(grouped).map(([date, amount]) => ({ date, amount: amount as number })));
 
       // Fetch visits
-      const visitsSnap = await getDocs(collection(db, 'visits'));
+      const visitsSnap = await getDocs(query(collection(db, 'visits'), where('facilityId', '==', facilityId)));
       const visits = visitsSnap.docs.map(doc => doc.data());
       setVisitStats({
         total: visits.length,
@@ -49,7 +54,7 @@ const Reports: React.FC = () => {
       });
 
       // Patient growth (simple count for now)
-      const patientsSnap = await getDocs(collection(db, 'patients'));
+      const patientsSnap = await getDocs(query(collection(db, 'patients'), where('facilityId', '==', facilityId)));
       setPatientGrowth(patientsSnap.size);
 
       setLoading(false);

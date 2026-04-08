@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, where } from 'firebase/firestore';
 import { 
@@ -12,12 +13,15 @@ import {
   Calendar,
   X,
   Loader2,
-  Filter
+  Filter,
+  CheckCircle2
 } from 'lucide-react';
-import { Patient } from '../types';
+import { Patient, UserProfile } from '../types';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
+import { auth } from '../firebase';
+import { getDoc, doc } from 'firebase/firestore';
 
 const Patients: React.FC = () => {
   const [patients, setPatients] = useState<Patient[]>([]);
@@ -25,6 +29,8 @@ const Patients: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const navigate = useNavigate();
 
   // Form state
   const [formData, setFormData] = useState({
@@ -40,13 +46,25 @@ const Patients: React.FC = () => {
   });
 
   useEffect(() => {
-    const q = query(collection(db, 'patients'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
-      setLoading(false);
-    });
+    const bootstrap = async () => {
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
 
-    return () => unsubscribe();
+          const q = query(collection(db, 'patients'), where('facilityId', '==', facilityId), orderBy('createdAt', 'desc'));
+          const unsubscribe = onSnapshot(q, (snapshot) => {
+            setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
+            setLoading(false);
+          });
+
+          return () => unsubscribe();
+        }
+      }
+    };
+    bootstrap();
   }, []);
 
   const filteredPatients = patients.filter(p => 
@@ -55,13 +73,57 @@ const Patients: React.FC = () => {
     p.phoneNumber.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleCheckIn = async (patient: Patient) => {
+    if (!user) return;
+    try {
+      const facilityId = user.facilityId || 'main-branch';
+      const visitRef = await addDoc(collection(db, 'visits'), {
+        patientId: patient.id,
+        date: new Date().toISOString(),
+        status: 'checked-in',
+        facilityId,
+        createdAt: serverTimestamp()
+      });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'CHECK_IN_PATIENT',
+        module: 'Patients',
+        details: `Checked in patient: ${patient.fullName} (${patient.id})`,
+        timestamp: serverTimestamp(),
+        facilityId
+      });
+
+      alert(`${patient.fullName} checked in successfully!`);
+      navigate(`/visits/${visitRef.id}/workflow`);
+    } catch (error) {
+      console.error('Error checking in patient:', error);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'patients'), {
+      const facilityId = user.facilityId || 'main-branch';
+      const patientRef = await addDoc(collection(db, 'patients'), {
         ...formData,
+        facilityId,
         createdAt: serverTimestamp()
+      });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'REGISTER_PATIENT',
+        module: 'Patients',
+        details: `Registered patient: ${formData.fullName} (ID: ${formData.idNumber})`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
       setIsModalOpen(false);
       setFormData({
@@ -173,13 +235,22 @@ const Patients: React.FC = () => {
                       </p>
                     </td>
                     <td className="px-6 py-4 text-right">
-                      <Link
-                        to={`/patients/${patient.id}`}
-                        className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-                      >
-                        Details
-                        <ChevronRight className="w-4 h-4" />
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleCheckIn(patient)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded-lg text-xs font-bold hover:bg-green-100 dark:hover:bg-green-900/50 transition-all"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          Check-in
+                        </button>
+                        <Link
+                          to={`/patients/${patient.id}`}
+                          className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                        >
+                          Details
+                          <ChevronRight className="w-4 h-4" />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

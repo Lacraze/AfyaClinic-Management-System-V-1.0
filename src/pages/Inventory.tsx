@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, deleteDoc, where } from 'firebase/firestore';
 import { 
   Package, 
   Search, 
@@ -19,9 +19,11 @@ import {
   Layers,
   Box
 } from 'lucide-react';
-import { InventoryItem } from '../types';
+import { InventoryItem, UserProfile } from '../types';
 import { format, isPast, isWithinInterval, addMonths } from 'date-fns';
 import { cn } from '../lib/utils';
+import { auth } from '../firebase';
+import { getDoc } from 'firebase/firestore';
 
 const Inventory: React.FC = () => {
   const [items, setItems] = useState<InventoryItem[]>([]);
@@ -31,6 +33,8 @@ const Inventory: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'drug' | 'equipment' | 'other'>('all');
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -49,12 +53,27 @@ const Inventory: React.FC = () => {
   });
 
   useEffect(() => {
-    const inventoryUnsub = onSnapshot(query(collection(db, 'inventory'), orderBy('name', 'asc')), (snapshot) => {
-      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
-      setLoading(false);
-    });
+    const bootstrap = async () => {
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
 
-    return () => inventoryUnsub();
+          const inventoryUnsub = onSnapshot(
+            query(collection(db, 'inventory'), where('facilityId', '==', facilityId), orderBy('name', 'asc')), 
+            (snapshot) => {
+              setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+              setLoading(false);
+            }
+          );
+
+          return () => inventoryUnsub();
+        }
+      }
+    };
+    bootstrap();
   }, []);
 
   const filteredItems = items.filter(item => {
@@ -67,17 +86,42 @@ const Inventory: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setSubmitting(true);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       if (editingItem) {
         await updateDoc(doc(db, 'inventory', editingItem.id), {
           ...formData,
           updatedAt: serverTimestamp()
         });
+
+        // Audit Log
+        await addDoc(collection(db, 'audit_logs'), {
+          userId: user.uid,
+          userEmail: user.email,
+          action: 'UPDATE_INVENTORY',
+          module: 'Inventory',
+          details: `Updated item: ${formData.name}`,
+          timestamp: serverTimestamp(),
+          facilityId
+        });
       } else {
         await addDoc(collection(db, 'inventory'), {
           ...formData,
+          facilityId,
           createdAt: serverTimestamp()
+        });
+
+        // Audit Log
+        await addDoc(collection(db, 'audit_logs'), {
+          userId: user.uid,
+          userEmail: user.email,
+          action: 'ADD_INVENTORY',
+          module: 'Inventory',
+          details: `Added new item: ${formData.name}`,
+          timestamp: serverTimestamp(),
+          facilityId
         });
       }
       handleCloseModal();
@@ -108,13 +152,13 @@ const Inventory: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this item?')) {
-      try {
-        await deleteDoc(doc(db, 'inventory', id));
-      } catch (error) {
-        console.error('Error deleting item:', error);
-      }
+  const handleDelete = async () => {
+    if (!itemToDelete) return;
+    try {
+      await deleteDoc(doc(db, 'inventory', itemToDelete));
+      setItemToDelete(null);
+    } catch (error) {
+      console.error('Error deleting item:', error);
     }
   };
 
@@ -349,7 +393,7 @@ const Inventory: React.FC = () => {
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button 
-                            onClick={() => handleDelete(item.id)}
+                            onClick={() => setItemToDelete(item.id)}
                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -369,6 +413,38 @@ const Inventory: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {itemToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setItemToDelete(null)} />
+          <div className="relative bg-white w-full max-w-md rounded-2xl shadow-2xl p-6 space-y-6">
+            <div className="flex items-center gap-4 text-red-600">
+              <div className="p-3 bg-red-100 rounded-xl">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-bold">Delete Item?</h3>
+            </div>
+            <p className="text-gray-600">
+              Are you sure you want to delete this item? This action cannot be undone and will remove the item from all inventory records.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setItemToDelete(null)}
+                className="flex-1 px-4 py-2.5 border border-gray-200 text-gray-600 rounded-xl font-semibold hover:bg-gray-50 transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-semibold hover:bg-red-700 transition-all shadow-sm"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add/Edit Modal */}
       {isModalOpen && (

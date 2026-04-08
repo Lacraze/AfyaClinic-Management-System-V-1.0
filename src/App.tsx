@@ -22,6 +22,7 @@ import Utilities from './pages/Utilities';
 import Reports from './pages/Reports';
 import VisitWorkflow from './pages/VisitWorkflow';
 import Inventory from './pages/Inventory';
+import AuditLogs from './pages/AuditLogs';
 
 export default function App() {
   return (
@@ -131,6 +132,14 @@ export default function App() {
           <ProtectedRoute allowedRoles={['admin', 'pharmacist', 'nurse', 'doctor', 'receptionist', 'accountant']}>
             <Layout>
               <Inventory />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
+        <Route path="/audit-logs" element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <Layout>
+              <AuditLogs />
             </Layout>
           </ProtectedRoute>
         } />

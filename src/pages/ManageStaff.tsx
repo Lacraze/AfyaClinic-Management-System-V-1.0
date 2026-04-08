@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
-import { collection, onSnapshot, doc, updateDoc, query, orderBy } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { collection, onSnapshot, doc, updateDoc, query, orderBy, where, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from '../types';
 import { 
   Users, 
@@ -22,6 +22,7 @@ const ManageStaff: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [updatingUid, setUpdatingUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   const roleDescriptions: Record<UserRole, string> = {
     admin: 'Full system access, staff management, and clinical oversight.',
@@ -35,29 +36,59 @@ const ManageStaff: React.FC = () => {
   };
 
   useEffect(() => {
-    const q = query(collection(db, 'users'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const staffData = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        uid: doc.id
-      })) as UserProfile[];
-      setStaff(staffData);
-      setLoading(false);
-    }, (err) => {
-      console.error('Error fetching staff:', err);
-      setError('You do not have permission to view staff records.');
-      setLoading(false);
-    });
+    const bootstrap = async () => {
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
 
-    return () => unsubscribe();
+          const q = query(
+            collection(db, 'users'), 
+            where('facilityId', '==', facilityId),
+            orderBy('createdAt', 'desc')
+          );
+          
+          const unsubscribe = onSnapshot(q, (snapshot) => {
+            const staffData = snapshot.docs.map(doc => ({
+              ...doc.data(),
+              uid: doc.id
+            })) as UserProfile[];
+            setStaff(staffData);
+            setLoading(false);
+          }, (err) => {
+            console.error('Error fetching staff:', err);
+            setError('You do not have permission to view staff records.');
+            setLoading(false);
+          });
+
+          return () => unsubscribe();
+        }
+      }
+    };
+    bootstrap();
   }, []);
 
   const handleRoleChange = async (uid: string, newRole: UserRole) => {
+    if (!user) return;
     setUpdatingUid(uid);
     setError(null);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       await updateDoc(doc(db, 'users', uid), {
         role: newRole
+      });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'UPDATE_STAFF_ROLE',
+        module: 'Staff Management',
+        details: `Updated role for user ${uid} to ${newRole}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
     } catch (err: any) {
       console.error('Error updating role:', err);
@@ -68,11 +99,25 @@ const ManageStaff: React.FC = () => {
   };
 
   const handleStatusToggle = async (uid: string, currentStatus: 'active' | 'inactive') => {
+    if (!user) return;
     setUpdatingUid(uid);
     setError(null);
     try {
+      const facilityId = user.facilityId || 'main-branch';
+      const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
       await updateDoc(doc(db, 'users', uid), {
-        status: currentStatus === 'active' ? 'inactive' : 'active'
+        status: newStatus
+      });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'UPDATE_STAFF_STATUS',
+        module: 'Staff Management',
+        details: `Updated status for user ${uid} to ${newStatus}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
     } catch (err: any) {
       console.error('Error updating status:', err);
@@ -202,7 +247,18 @@ const ManageStaff: React.FC = () => {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                       <Calendar className="w-4 h-4" />
-                      {member.createdAt ? format(new Date(member.createdAt), 'MMM d, yyyy') : 'N/A'}
+                      {(() => {
+                        try {
+                          if (!member.createdAt) return 'N/A';
+                          // Handle Firestore Timestamp or String
+                          const date = (member.createdAt as any).toDate 
+                            ? (member.createdAt as any).toDate() 
+                            : new Date(member.createdAt);
+                          return isNaN(date.getTime()) ? 'N/A' : format(date, 'MMM d, yyyy');
+                        } catch (e) {
+                          return 'N/A';
+                        }
+                      })()}
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">

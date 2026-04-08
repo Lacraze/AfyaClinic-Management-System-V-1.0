@@ -9,6 +9,7 @@ const Signup: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('receptionist');
+  const [facilityId, setFacilityId] = useState('main-branch');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -30,7 +31,7 @@ const Signup: React.FC = () => {
     setError(null);
 
     try {
-      await signupWithEmailPassword(email, password, fullName, role);
+      await signupWithEmailPassword(email, password, fullName, role, facilityId);
       navigate('/login', { state: { message: 'Account created successfully! Please log in.' } });
     } catch (err: any) {
       console.error('Signup error:', err);
@@ -135,6 +136,27 @@ const Signup: React.FC = () => {
               <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 italic">
                 {roleDescriptions[role]}
               </p>
+            </div>
+
+            <div>
+              <label htmlFor="facility" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Assigned Facility / Branch
+              </label>
+              <div className="mt-1">
+                <select
+                  id="facility"
+                  name="facility"
+                  required
+                  value={facilityId}
+                  onChange={(e) => setFacilityId(e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-700 dark:text-white"
+                >
+                  <option value="main-branch">Main Branch (Nairobi)</option>
+                  <option value="mombasa-branch">Mombasa Branch</option>
+                  <option value="kisumu-branch">Kisumu Branch</option>
+                  <option value="nakuru-branch">Nakuru Branch</option>
+                </select>
+              </div>
             </div>
 
             <div>

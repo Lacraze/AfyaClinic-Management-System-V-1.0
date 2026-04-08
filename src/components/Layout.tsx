@@ -100,6 +100,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Staff List', path: '/staff', icon: UserCog, roles: ['admin', 'hr'] },
     { name: 'Utilities', path: '/utilities', icon: Zap, roles: ['admin', 'accountant'] },
     { name: 'Reports', path: '/reports', icon: BarChart3, roles: ['admin', 'accountant'] },
+    { name: 'Audit Logs', path: '/audit-logs', icon: Shield, roles: ['admin'] },
   ];
 
   const filteredNavItems = navItems.filter(item => user && item.roles.includes(user.role));
@@ -166,13 +167,15 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {/* Current User (Admin) */}
               <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50">
                 <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm ring-2 ring-blue-100 dark:ring-blue-900/50">
-                  {user?.fullName?.charAt(0) || user?.email?.charAt(0)}
+                  {user?.fullName?.charAt(0) || user?.displayName?.charAt(0) || user?.email?.charAt(0) || '?'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 dark:text-white truncate leading-tight">{user?.fullName || user?.email}</p>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white truncate leading-tight">{user?.fullName || user?.displayName || user?.email || 'Admin'}</p>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                    <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-tighter">Admin Session</p>
+                    <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-tighter">
+                      {user?.facilityId?.replace('-', ' ') || 'Main Branch'}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -181,11 +184,11 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {activeStaff.map(staff => (
                 <div key={staff.uid} className="flex items-center gap-3 px-4 py-2 opacity-60 hover:opacity-100 transition-all cursor-default group">
                   <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400 font-bold text-xs group-hover:bg-gray-200 dark:group-hover:bg-gray-600 transition-colors">
-                    {staff.fullName?.charAt(0) || staff.email.charAt(0)}
+                    {staff.fullName?.charAt(0) || staff.displayName?.charAt(0) || staff.email?.charAt(0) || '?'}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{staff.fullName || staff.email}</p>
-                    <p className="text-[10px] text-gray-500 dark:text-gray-400 capitalize">{staff.role.replace('_', ' ')}</p>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">{staff.fullName || staff.displayName || staff.email}</p>
+                    <p className="text-[10px] text-gray-500 dark:text-gray-400 capitalize">{staff.role?.replace('_', ' ') || 'Staff'}</p>
                   </div>
                 </div>
               ))}

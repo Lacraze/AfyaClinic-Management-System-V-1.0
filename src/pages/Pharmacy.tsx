@@ -17,9 +17,11 @@ import {
   ArrowUpCircle,
   ClipboardList
 } from 'lucide-react';
-import { InventoryItem, Prescription } from '../types';
+import { InventoryItem, Prescription, UserProfile } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { auth } from '../firebase';
+import { getDoc } from 'firebase/firestore';
 
 const Pharmacy: React.FC = () => {
   const [drugs, setDrugs] = useState<InventoryItem[]>([]);
@@ -29,6 +31,7 @@ const Pharmacy: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'prescriptions'>('inventory');
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   // Form state for new drug
   const [formData, setFormData] = useState({
@@ -48,19 +51,37 @@ const Pharmacy: React.FC = () => {
   });
 
   useEffect(() => {
-    const drugsUnsub = onSnapshot(query(collection(db, 'inventory'), where('type', '==', 'drug'), orderBy('name', 'asc')), (snapshot) => {
-      setDrugs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
-      setLoading(false);
-    });
+    const bootstrap = async () => {
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
 
-    const prescriptionsUnsub = onSnapshot(query(collection(db, 'prescriptions'), orderBy('prescribedAt', 'desc')), (snapshot) => {
-      setPrescriptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription)));
-    });
+          const drugsUnsub = onSnapshot(
+            query(collection(db, 'inventory'), where('type', '==', 'drug'), where('facilityId', '==', facilityId), orderBy('name', 'asc')), 
+            (snapshot) => {
+              setDrugs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+              setLoading(false);
+            }
+          );
 
-    return () => {
-      drugsUnsub();
-      prescriptionsUnsub();
+          const prescriptionsUnsub = onSnapshot(
+            query(collection(db, 'prescriptions'), where('facilityId', '==', facilityId), orderBy('prescribedAt', 'desc')), 
+            (snapshot) => {
+              setPrescriptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription)));
+            }
+          );
+
+          return () => {
+            drugsUnsub();
+            prescriptionsUnsub();
+          };
+        }
+      }
     };
+    bootstrap();
   }, []);
 
   const filteredDrugs = drugs.filter(d => 
@@ -70,11 +91,25 @@ const Pharmacy: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setSubmitting(true);
     try {
-      await addDoc(collection(db, 'inventory'), {
+      const facilityId = user.facilityId || 'main-branch';
+      const drugRef = await addDoc(collection(db, 'inventory'), {
         ...formData,
+        facilityId,
         createdAt: serverTimestamp()
+      });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'ADD_DRUG',
+        module: 'Pharmacy',
+        details: `Added new drug: ${formData.name}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
       setIsModalOpen(false);
       setFormData({
@@ -100,7 +135,9 @@ const Pharmacy: React.FC = () => {
   };
 
   const handleDispense = async (prescription: Prescription) => {
+    if (!user) return;
     try {
+      const facilityId = user.facilityId || 'main-branch';
       // Update prescription status
       await updateDoc(doc(db, 'prescriptions', prescription.id), {
         status: 'dispensed',
@@ -113,6 +150,17 @@ const Pharmacy: React.FC = () => {
       if (drug) {
         await updateDoc(drugRef, {
           stockQuantity: drug.stockQuantity - prescription.quantity
+        });
+
+        // Audit Log
+        await addDoc(collection(db, 'audit_logs'), {
+          userId: user.uid,
+          userEmail: user.email,
+          action: 'DISPENSE_DRUG',
+          module: 'Pharmacy',
+          details: `Dispensed ${prescription.quantity} units of ${prescription.drugName} to patient ${prescription.patientId}`,
+          timestamp: serverTimestamp(),
+          facilityId
         });
       }
     } catch (error) {

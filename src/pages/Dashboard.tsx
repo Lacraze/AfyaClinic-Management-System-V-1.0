@@ -27,66 +27,88 @@ const Dashboard: React.FC = () => {
     pendingAppointments: 0
   });
   const [recentVisits, setRecentVisits] = useState<Visit[]>([]);
+  const [queue, setQueue] = useState<(Visit & { patientName?: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<UserProfile | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchUser = async () => {
+    const bootstrapAdmin = async () => {
       if (auth.currentUser) {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
-          setUser(userDoc.data() as UserProfile);
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          
+          // Start real-time listeners with facility filtering
+          const facilityId = userData.facilityId || 'main-branch';
+          
+          const patientsUnsub = onSnapshot(query(collection(db, 'patients'), where('facilityId', '==', facilityId)), (snapshot) => {
+            setStats(prev => ({ ...prev, totalPatients: snapshot.size }));
+          });
+
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+
+          const visitsUnsub = onSnapshot(
+            query(collection(db, 'visits'), where('facilityId', '==', facilityId), where('date', '>=', today.toISOString())),
+            (snapshot) => {
+              setStats(prev => ({ ...prev, visitsToday: snapshot.size }));
+            }
+          );
+
+          const drugsUnsub = onSnapshot(query(collection(db, 'inventory'), where('facilityId', '==', facilityId), where('type', '==', 'drug')), (snapshot) => {
+            const lowStock = snapshot.docs.filter(doc => {
+              const drug = doc.data() as InventoryItem;
+              return drug.stockQuantity <= drug.reorderLevel;
+            }).length;
+            setStats(prev => ({ ...prev, lowStockDrugs: lowStock }));
+          });
+
+          const recentVisitsUnsub = onSnapshot(
+            query(collection(db, 'visits'), where('facilityId', '==', facilityId), orderBy('date', 'desc'), limit(5)),
+            (snapshot) => {
+              setRecentVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+              setLoading(false);
+            }
+          );
+
+          const queueUnsub = onSnapshot(
+            query(
+              collection(db, 'visits'), 
+              where('facilityId', '==', facilityId), 
+              where('status', 'in', ['checked-in', 'vitals', 'history', 'encounter']),
+              orderBy('date', 'asc')
+            ),
+            async (snapshot) => {
+              const queueData = await Promise.all(snapshot.docs.map(async (vDoc) => {
+                const visit = { id: vDoc.id, ...vDoc.data() } as Visit;
+                const pDoc = await getDoc(doc(db, 'patients', visit.patientId));
+                return { ...visit, patientName: pDoc.exists() ? pDoc.data().fullName : 'Unknown' };
+              }));
+              setQueue(queueData);
+            }
+          );
+
+          const appointmentsUnsub = onSnapshot(
+            query(collection(db, 'visits'), where('facilityId', '==', facilityId), where('status', '==', 'scheduled')),
+            (snapshot) => {
+              setStats(prev => ({ ...prev, pendingAppointments: snapshot.size }));
+            }
+          );
+
+          return () => {
+            patientsUnsub();
+            visitsUnsub();
+            drugsUnsub();
+            recentVisitsUnsub();
+            queueUnsub();
+            appointmentsUnsub();
+          };
         }
       }
     };
-    fetchUser();
-
-    // Real-time stats
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const patientsUnsub = onSnapshot(collection(db, 'patients'), (snapshot) => {
-      setStats(prev => ({ ...prev, totalPatients: snapshot.size }));
-    });
-
-    const visitsUnsub = onSnapshot(
-      query(collection(db, 'visits'), where('date', '>=', today.toISOString())),
-      (snapshot) => {
-        setStats(prev => ({ ...prev, visitsToday: snapshot.size }));
-      }
-    );
-
-    const drugsUnsub = onSnapshot(query(collection(db, 'inventory'), where('type', '==', 'drug')), (snapshot) => {
-      const lowStock = snapshot.docs.filter(doc => {
-        const drug = doc.data() as InventoryItem;
-        return drug.stockQuantity <= drug.reorderLevel;
-      }).length;
-      setStats(prev => ({ ...prev, lowStockDrugs: lowStock }));
-    });
-
-    const recentVisitsUnsub = onSnapshot(
-      query(collection(db, 'visits'), orderBy('date', 'desc'), limit(5)),
-      (snapshot) => {
-        setRecentVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
-        setLoading(false);
-      }
-    );
-
-    const appointmentsUnsub = onSnapshot(
-      query(collection(db, 'visits'), where('status', '==', 'scheduled')),
-      (snapshot) => {
-        setStats(prev => ({ ...prev, pendingAppointments: snapshot.size }));
-      }
-    );
-
-    return () => {
-      patientsUnsub();
-      visitsUnsub();
-      drugsUnsub();
-      recentVisitsUnsub();
-      appointmentsUnsub();
-    };
+    bootstrapAdmin();
   }, []);
 
   const statCards = [
@@ -159,35 +181,33 @@ const Dashboard: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Recent Activity */}
+        {/* Live Queue */}
         <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
           <div className="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Recent Visits</h2>
-            <button 
-              onClick={() => navigate('/patients')}
-              className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-            >
-              View all
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <h2 className="text-lg font-bold text-gray-900 dark:text-white">Live Patient Queue</h2>
+            </div>
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">{queue.length} Waiting</span>
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
-            {recentVisits.length > 0 ? (
-              recentVisits.map((visit) => (
-                <div key={visit.id} className="p-6 flex items-center gap-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                  <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400">
-                    <Clock className="w-6 h-6" />
+            {queue.length > 0 ? (
+              queue.map((visit) => (
+                <div key={visit.id} className="p-6 flex items-center gap-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer" onClick={() => navigate(`/visits/${visit.id}/workflow`)}>
+                  <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-700 dark:text-blue-400 font-bold">
+                    {visit.patientName?.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">Visit ID: {visit.id.slice(0, 8)}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{format(new Date(visit.date), 'PPpp')}</p>
+                    <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{visit.patientName}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Arrived: {format(new Date(visit.date), 'p')}</p>
                   </div>
                   <div className="flex flex-col items-end gap-1">
                       <span className={cn(
-                        "px-2.5 py-0.5 rounded-full text-xs font-medium capitalize",
-                        visit.status === 'completed' ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400" :
-                        visit.status === 'scheduled' ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400" :
-                        visit.status === 'no-show' ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400" :
-                        "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+                        "px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-tighter",
+                        visit.status === 'checked-in' ? "bg-blue-100 text-blue-700" :
+                        visit.status === 'vitals' ? "bg-purple-100 text-purple-700" :
+                        visit.status === 'history' ? "bg-amber-100 text-amber-700" :
+                        "bg-green-100 text-green-700"
                       )}>
                         {visit.status.replace('-', ' ')}
                       </span>
@@ -196,8 +216,8 @@ const Dashboard: React.FC = () => {
               ))
             ) : (
               <div className="p-12 text-center text-gray-500 dark:text-gray-400">
-                <Activity className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                <p>No recent visits found.</p>
+                <Users className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                <p>Queue is currently empty.</p>
               </div>
             )}
           </div>

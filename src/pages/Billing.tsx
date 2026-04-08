@@ -16,12 +16,14 @@ import {
   Filter,
   ArrowUpRight,
   ArrowDownRight,
+  Printer,
   FileText,
   ChevronRight
 } from 'lucide-react';
-import { Invoice, Payment, Visit } from '../types';
+import { Invoice, Payment, Visit, UserProfile } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { auth } from '../firebase';
 
 const Billing: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -32,6 +34,7 @@ const Billing: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'revenue' | 'outstanding' | 'paid' | 'unpaid' | 'pending'>('outstanding');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [paymentForm, setPaymentForm] = useState({
     amount: 0,
     method: 'cash' as Payment['method'],
@@ -40,29 +43,50 @@ const Billing: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const invoicesUnsub = onSnapshot(query(collection(db, 'invoices'), orderBy('createdAt', 'desc')), (snapshot) => {
-      setInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice)));
-      setLoading(false);
-    });
+    const bootstrap = async () => {
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
 
-    const paymentsUnsub = onSnapshot(query(collection(db, 'payments'), orderBy('date', 'desc')), (snapshot) => {
-      setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
-    });
+          const invoicesUnsub = onSnapshot(
+            query(collection(db, 'invoices'), where('facilityId', '==', facilityId), orderBy('createdAt', 'desc')), 
+            (snapshot) => {
+              setInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice)));
+              setLoading(false);
+            }
+          );
 
-    const pendingVisitsUnsub = onSnapshot(query(collection(db, 'visits'), where('status', '==', 'billing')), async (snapshot) => {
-      const visits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
-      const visitsWithNames = await Promise.all(visits.map(async (v) => {
-        const patientDoc = await getDoc(doc(db, 'patients', v.patientId));
-        return { ...v, patientName: patientDoc.exists() ? patientDoc.data().fullName : 'Unknown' };
-      }));
-      setPendingVisits(visitsWithNames);
-    });
+          const paymentsUnsub = onSnapshot(
+            query(collection(db, 'payments'), where('facilityId', '==', facilityId), orderBy('date', 'desc')), 
+            (snapshot) => {
+              setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
+            }
+          );
 
-    return () => {
-      invoicesUnsub();
-      paymentsUnsub();
-      pendingVisitsUnsub();
+          const pendingVisitsUnsub = onSnapshot(
+            query(collection(db, 'visits'), where('facilityId', '==', facilityId), where('status', '==', 'billing')), 
+            async (snapshot) => {
+              const visits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
+              const visitsWithNames = await Promise.all(visits.map(async (v) => {
+                const patientDoc = await getDoc(doc(db, 'patients', v.patientId));
+                return { ...v, patientName: patientDoc.exists() ? patientDoc.data().fullName : 'Unknown' };
+              }));
+              setPendingVisits(visitsWithNames);
+            }
+          );
+
+          return () => {
+            invoicesUnsub();
+            paymentsUnsub();
+            pendingVisitsUnsub();
+          };
+        }
+      }
     };
+    bootstrap();
   }, []);
 
   const filteredInvoices = invoices.filter(i => 
@@ -77,18 +101,114 @@ const Billing: React.FC = () => {
     unpaidInvoices: invoices.filter(i => i.status === 'unpaid').length
   };
 
+  const handlePrintInvoice = (invoice: Invoice) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) return;
+
+    const itemsHtml = invoice.items.map(item => `
+      <tr>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.description}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">${item.quantity}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">KES ${item.unitPrice.toLocaleString()}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">KES ${item.total.toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Invoice ${invoice.id}</title>
+          <style>
+            body { font-family: sans-serif; padding: 40px; color: #333; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 40px; }
+            .clinic-info h1 { margin: 0; color: #2563eb; }
+            .invoice-info { text-align: right; }
+            table { width: 100%; border-collapse: collapse; margin-bottom: 40px; }
+            th { text-align: left; padding: 8px; border-bottom: 2px solid #eee; }
+            .totals { text-align: right; }
+            .footer { margin-top: 80px; text-align: center; font-size: 12px; color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <div class="clinic-info">
+              <h1>AfyaClinic</h1>
+              <p>${user?.facilityId || 'Main Branch'}</p>
+            </div>
+            <div class="invoice-info">
+              <h2>INVOICE</h2>
+              <p>#${invoice.id}</p>
+              <p>Date: ${format(new Date(invoice.createdAt), 'PP')}</p>
+            </div>
+          </div>
+          
+          <div style="margin-bottom: 40px;">
+            <strong>Bill To:</strong>
+            <p>Patient ID: ${invoice.patientId}</p>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Description</th>
+                <th style="text-align: right;">Qty</th>
+                <th style="text-align: right;">Unit Price</th>
+                <th style="text-align: right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+
+          <div class="totals">
+            <p>Subtotal: KES ${invoice.subtotal.toLocaleString()}</p>
+            <p>Tax: KES ${invoice.tax.toLocaleString()}</p>
+            <h3 style="color: #2563eb;">Total Amount: KES ${invoice.total.toLocaleString()}</h3>
+            <p>Status: <span style="text-transform: uppercase; font-weight: bold;">${invoice.status}</span></p>
+          </div>
+
+          <div class="footer">
+            <p>Thank you for choosing AfyaClinic. Get well soon!</p>
+            <p>This is a computer generated invoice.</p>
+          </div>
+          <script>
+            window.onload = () => {
+              window.print();
+              window.close();
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedInvoice) return;
+    if (!selectedInvoice || !user) return;
 
     try {
+      const facilityId = user.facilityId || 'main-branch';
       // Add payment record
       await addDoc(collection(db, 'payments'), {
         invoiceId: selectedInvoice.id,
         amount: paymentForm.amount,
         method: paymentForm.method,
         reference: paymentForm.reference,
-        date: new Date().toISOString()
+        date: new Date().toISOString(),
+        facilityId
+      });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'RECORD_PAYMENT',
+        module: 'Billing',
+        details: `Recorded payment of KES ${paymentForm.amount} for invoice ${selectedInvoice.id}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
 
       // Update invoice status
@@ -416,18 +536,27 @@ const Billing: React.FC = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          {invoice.status !== 'paid' && (
-                            <button 
-                              onClick={() => {
-                                setSelectedInvoice(invoice);
-                                setPaymentForm({ ...paymentForm, amount: balance });
-                                setIsPaymentModalOpen(true);
-                              }}
-                              className="text-sm font-bold text-blue-600 hover:text-blue-700"
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              onClick={() => handlePrintInvoice(invoice)}
+                              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Print Invoice"
                             >
-                              Record Payment
+                              <Printer className="w-4 h-4" />
                             </button>
-                          )}
+                            {invoice.status !== 'paid' && (
+                              <button 
+                                onClick={() => {
+                                  setSelectedInvoice(invoice);
+                                  setPaymentForm({ ...paymentForm, amount: balance });
+                                  setIsPaymentModalOpen(true);
+                                }}
+                                className="text-sm font-bold text-blue-600 hover:text-blue-700"
+                              >
+                                Record Payment
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );

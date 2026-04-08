@@ -40,6 +40,7 @@ const VisitWorkflow: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [activeStep, setActiveStep] = useState<string>('vitals');
   const [drugs, setDrugs] = useState<InventoryItem[]>([]);
 
   // Form states
@@ -58,6 +59,18 @@ const VisitWorkflow: React.FC = () => {
           const visitData = { id: visitDoc.id, ...visitDoc.data() } as Visit;
           setVisit(visitData);
           
+          // Set active step based on status
+          const statusIndex = steps.findIndex(s => s.id === visitData.status);
+          if (visitData.status === 'checked-in') {
+            setActiveStep('vitals');
+          } else if (visitData.status === 'completed') {
+            setActiveStep('completed');
+          } else if (statusIndex !== -1) {
+            setActiveStep(visitData.status);
+          } else {
+            setActiveStep('vitals');
+          }
+
           // Pre-fill forms if data exists
           if (visitData.vitals) setVitalsForm(visitData.vitals);
           if (visitData.history) setHistoryForm(visitData.history);
@@ -96,16 +109,36 @@ const VisitWorkflow: React.FC = () => {
     if (!visitId || !user) return;
     setSaving(true);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       const vitalsData = {
         ...vitalsForm,
         recordedBy: user.displayName || user.email,
         recordedAt: new Date().toISOString()
       };
-      await updateDoc(doc(db, 'visits', visitId), {
-        vitals: vitalsData,
-        status: 'history'
+
+      const updateData: any = { vitals: vitalsData };
+      
+      // Only advance status if we are currently at or before 'vitals'
+      if (visit?.status === 'checked-in' || visit?.status === 'vitals') {
+        updateData.status = 'history';
+      }
+
+      await updateDoc(doc(db, 'visits', visitId), updateData);
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'SAVE_VITALS',
+        module: 'EMR',
+        details: `Recorded vitals for visit ${visitId}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
+
       setVisit(prev => prev ? { ...prev, vitals: vitalsData as Vitals, status: 'history' } : null);
+      setActiveStep('history');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       console.error('Error saving vitals:', error);
     } finally {
@@ -117,16 +150,36 @@ const VisitWorkflow: React.FC = () => {
     if (!visitId || !user) return;
     setSaving(true);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       const historyData = {
         ...historyForm,
         recordedBy: user.displayName || user.email,
         recordedAt: new Date().toISOString()
       };
-      await updateDoc(doc(db, 'visits', visitId), {
-        history: historyData,
-        status: 'encounter'
+
+      const updateData: any = { history: historyData };
+      
+      // Only advance status if we are currently at 'history'
+      if (visit?.status === 'history') {
+        updateData.status = 'encounter';
+      }
+
+      await updateDoc(doc(db, 'visits', visitId), updateData);
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'SAVE_HISTORY',
+        module: 'EMR',
+        details: `Recorded history for visit ${visitId}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
+
       setVisit(prev => prev ? { ...prev, history: historyData as History, status: 'encounter' } : null);
+      setActiveStep('encounter');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       console.error('Error saving history:', error);
     } finally {
@@ -138,16 +191,36 @@ const VisitWorkflow: React.FC = () => {
     if (!visitId || !user) return;
     setSaving(true);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       const encounterData = {
         ...encounterForm,
         doctorId: user.uid,
         recordedAt: new Date().toISOString()
       };
-      await updateDoc(doc(db, 'visits', visitId), {
-        encounter: encounterData,
-        status: 'billing'
+
+      const updateData: any = { encounter: encounterData };
+      
+      // Only advance status if we are currently at 'encounter'
+      if (visit?.status === 'encounter') {
+        updateData.status = 'billing';
+      }
+
+      await updateDoc(doc(db, 'visits', visitId), updateData);
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'SAVE_ENCOUNTER',
+        module: 'EMR',
+        details: `Recorded encounter for visit ${visitId}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
+
       setVisit(prev => prev ? { ...prev, encounter: encounterData as Encounter, status: 'billing' } : null);
+      setActiveStep('billing');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       console.error('Error saving encounter:', error);
     } finally {
@@ -156,9 +229,10 @@ const VisitWorkflow: React.FC = () => {
   };
 
   const handleSaveBilling = async () => {
-    if (!visitId || !patient) return;
+    if (!visitId || !patient || !user) return;
     setSaving(true);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       const subtotal = billingItems.reduce((sum, item) => sum + item.total, 0);
       const tax = subtotal * 0; // No tax for now
       const total = subtotal + tax;
@@ -171,11 +245,23 @@ const VisitWorkflow: React.FC = () => {
         tax,
         total,
         status: 'unpaid',
+        facilityId,
         createdAt: serverTimestamp()
       });
 
       await updateDoc(doc(db, 'visits', visitId), {
         status: 'completed'
+      });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'COMPLETE_VISIT',
+        module: 'Billing',
+        details: `Completed visit ${visitId} and generated invoice for KES ${total}`,
+        timestamp: serverTimestamp(),
+        facilityId
       });
 
       navigate(`/patients/${patient.id}`);
@@ -196,9 +282,7 @@ const VisitWorkflow: React.FC = () => {
 
   if (!visit || !patient) return null;
 
-  const currentStepIndex = steps.findIndex(s => s.id === visit.status) === -1 
-    ? (visit.status === 'checked-in' ? 0 : steps.length - 1)
-    : steps.findIndex(s => s.id === visit.status);
+  const currentStepIndex = steps.findIndex(s => s.id === activeStep);
 
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -236,11 +320,28 @@ const VisitWorkflow: React.FC = () => {
 
           {steps.map((step, index) => {
             const Icon = step.icon;
-            const isCompleted = index < currentStepIndex;
-            const isActive = index === currentStepIndex;
+            const statusIndex = steps.findIndex(s => s.id === visit.status);
+            const effectiveStatusIndex = statusIndex === -1 ? 0 : statusIndex;
+            
+            const isCompleted = (statusIndex !== -1 && index < statusIndex) || visit.status === 'completed';
+            const isActive = step.id === activeStep;
+            const isLocked = index > effectiveStatusIndex && visit.status !== 'completed';
 
             return (
-              <div key={step.id} className="relative z-10 flex flex-col items-center gap-2">
+              <button 
+                key={step.id} 
+                onClick={() => {
+                  if (!isLocked) {
+                    setActiveStep(step.id);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }
+                }}
+                disabled={isLocked}
+                className={cn(
+                  "relative z-10 flex flex-col items-center gap-2 transition-all",
+                  isLocked ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:scale-105"
+                )}
+              >
                 <div className={cn(
                   "w-10 h-10 rounded-full flex items-center justify-center transition-all duration-300",
                   isCompleted ? "bg-green-600 text-white" : 
@@ -255,7 +356,7 @@ const VisitWorkflow: React.FC = () => {
                 )}>
                   {step.label}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
@@ -264,7 +365,7 @@ const VisitWorkflow: React.FC = () => {
       {/* Step Content */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
         {/* Vitals Step */}
-        {visit.status === 'checked-in' || visit.status === 'vitals' ? (
+        {activeStep === 'vitals' ? (
           <div className="p-8 space-y-8">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-blue-100 rounded-lg">
@@ -353,7 +454,18 @@ const VisitWorkflow: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end pt-6 border-t border-gray-100">
+            <div className="flex justify-end pt-6 border-t border-gray-100 gap-3">
+              {visit.status !== 'checked-in' && visit.status !== 'vitals' && (
+                <button
+                  onClick={() => {
+                    setActiveStep('history');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-6 py-3 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-all flex items-center gap-2"
+                >
+                  Next <ChevronRight className="w-5 h-5" />
+                </button>
+              )}
               <button
                 onClick={handleSaveVitals}
                 disabled={saving}
@@ -363,7 +475,7 @@ const VisitWorkflow: React.FC = () => {
               </button>
             </div>
           </div>
-        ) : visit.status === 'history' ? (
+        ) : activeStep === 'history' ? (
           <div className="p-8 space-y-8">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-purple-100 rounded-lg">
@@ -418,7 +530,27 @@ const VisitWorkflow: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end pt-6 border-t border-gray-100">
+            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
+              <button
+                onClick={() => {
+                  setActiveStep('vitals');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="px-6 py-3 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-all"
+              >
+                Back
+              </button>
+              {visit.status !== 'history' && (
+                <button
+                  onClick={() => {
+                    setActiveStep('encounter');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-6 py-3 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-all flex items-center gap-2"
+                >
+                  Next <ChevronRight className="w-5 h-5" />
+                </button>
+              )}
               <button
                 onClick={handleSaveHistory}
                 disabled={saving}
@@ -428,7 +560,7 @@ const VisitWorkflow: React.FC = () => {
               </button>
             </div>
           </div>
-        ) : visit.status === 'encounter' ? (
+        ) : activeStep === 'encounter' ? (
           <div className="p-8 space-y-8">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-green-100 rounded-lg">
@@ -473,7 +605,27 @@ const VisitWorkflow: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end pt-6 border-t border-gray-100">
+            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
+              <button
+                onClick={() => {
+                  setActiveStep('history');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="px-6 py-3 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-all"
+              >
+                Back
+              </button>
+              {visit.status !== 'encounter' && (
+                <button
+                  onClick={() => {
+                    setActiveStep('billing');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="px-6 py-3 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-all flex items-center gap-2"
+                >
+                  Next <ChevronRight className="w-5 h-5" />
+                </button>
+              )}
               <button
                 onClick={handleSaveEncounter}
                 disabled={saving}
@@ -483,7 +635,7 @@ const VisitWorkflow: React.FC = () => {
               </button>
             </div>
           </div>
-        ) : visit.status === 'billing' ? (
+        ) : activeStep === 'billing' ? (
           <div className="p-8 space-y-8">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-yellow-100 rounded-lg">
@@ -584,7 +736,16 @@ const VisitWorkflow: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex justify-end pt-6 border-t border-gray-100">
+            <div className="flex justify-end gap-3 pt-6 border-t border-gray-100">
+              <button
+                onClick={() => {
+                  setActiveStep('encounter');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="px-6 py-3 border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-all"
+              >
+                Back
+              </button>
               <button
                 onClick={handleSaveBilling}
                 disabled={saving || billingItems.length === 0}

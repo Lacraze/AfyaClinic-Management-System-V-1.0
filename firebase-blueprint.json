@@ -198,13 +198,14 @@
     }
   },
   "firestore": {
-    "/staff/{uid}": { "schema": "User", "description": "Staff user profiles" },
+    "/users/{uid}": { "schema": "User", "description": "Staff user profiles" },
     "/patients/{patientId}": { "schema": "Patient", "description": "Patient records" },
     "/visits/{visitId}": { "schema": "Visit", "description": "Patient visit records" },
     "/inventory/{itemId}": { "schema": "InventoryItem", "description": "Clinic inventory" },
     "/prescriptions/{prescriptionId}": { "schema": "Prescription", "description": "Medication prescriptions" },
     "/invoices/{invoiceId}": { "schema": "Invoice", "description": "Billing invoices" },
     "/payments/{paymentId}": { "schema": "Payment", "description": "Payment records" },
+    "/audit_logs/{logId}": { "schema": "object", "description": "Activity audit logs" },
     "/utilities/{utilityId}": { "schema": "Utility", "description": "Utility bills" },
     "/attendance/{attendanceId}": { "schema": "Attendance", "description": "Staff attendance logs" }
   }

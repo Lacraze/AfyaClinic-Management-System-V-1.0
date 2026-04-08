@@ -8,6 +8,7 @@ export interface UserProfile {
   role: UserRole;
   status: 'active' | 'inactive';
   phoneNumber?: string;
+  facilityId: string;
   createdAt: string;
 }
 
@@ -22,6 +23,7 @@ export interface Patient {
   nextOfKin: string;
   insuranceProvider?: string;
   insuranceNumber?: string;
+  facilityId: string;
   createdAt: string;
 }
 
@@ -60,6 +62,7 @@ export interface Visit {
   patientId: string;
   date: string;
   status: 'scheduled' | 'checked-in' | 'vitals' | 'history' | 'encounter' | 'billing' | 'completed' | 'no-show';
+  facilityId: string;
   vitals?: Vitals;
   history?: History;
   encounter?: Encounter;
@@ -143,4 +146,29 @@ export interface Attendance {
   date: string;
   clockIn: string;
   clockOut?: string;
+}
+
+export interface AuditLog {
+  id: string;
+  userId: string;
+  userEmail: string;
+  action: string;
+  module: string;
+  details: string;
+  timestamp: string;
+  facilityId: string;
+}
+
+export interface Appointment {
+  id: string;
+  patientId: string;
+  patientName: string;
+  doctorId: string;
+  doctorName: string;
+  date: string;
+  time: string;
+  duration: number; // in minutes
+  status: 'scheduled' | 'confirmed' | 'cancelled' | 'completed';
+  facilityId: string;
+  notes?: string;
 }

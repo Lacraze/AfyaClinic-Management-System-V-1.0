@@ -22,7 +22,7 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-export async function signupWithEmailPassword(email: string, password: string, displayName: string, role: string = 'receptionist') {
+export async function signupWithEmailPassword(email: string, password: string, displayName: string, role: string = 'receptionist', facilityId: string = 'main-branch') {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const uid = userCredential.user.uid;
@@ -32,6 +32,7 @@ export async function signupWithEmailPassword(email: string, password: string, d
       email,
       displayName,
       role,
+      facilityId,
       active: true,
       createdAt: serverTimestamp(),
     });
@@ -63,6 +64,7 @@ export async function signInWithGoogle() {
         email: user.email,
         displayName: user.displayName || '',
         role: 'receptionist',
+        facilityId: 'main-branch',
         active: true,
         createdAt: serverTimestamp(),
       });

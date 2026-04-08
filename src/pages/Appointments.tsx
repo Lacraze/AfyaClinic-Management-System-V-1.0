@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { db } from '../firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, doc, updateDoc } from 'firebase/firestore';
 import { 
@@ -12,11 +13,14 @@ import {
   Filter,
   ChevronRight,
   User,
+  Bell,
   AlertCircle
 } from 'lucide-react';
-import { Visit, Patient } from '../types';
-import { format, isToday, isTomorrow, isFuture } from 'date-fns';
+import { Visit, Patient, UserProfile } from '../types';
+import { format, isToday, isTomorrow, isFuture, addMinutes } from 'date-fns';
 import { cn } from '../lib/utils';
+import { auth } from '../firebase';
+import { getDoc } from 'firebase/firestore';
 
 const Appointments: React.FC = () => {
   const [visits, setVisits] = useState<Visit[]>([]);
@@ -24,6 +28,9 @@ const Appointments: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [conflict, setConflict] = useState<string | null>(null);
+  const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
     patientId: '',
@@ -33,33 +40,81 @@ const Appointments: React.FC = () => {
   });
 
   useEffect(() => {
-    const visitsUnsub = onSnapshot(query(collection(db, 'visits'), orderBy('date', 'asc')), (snapshot) => {
-      setVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
-      setLoading(false);
-    });
+    const bootstrap = async () => {
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
 
-    const patientsUnsub = onSnapshot(collection(db, 'patients'), (snapshot) => {
-      setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
-    });
+          const visitsUnsub = onSnapshot(
+            query(collection(db, 'visits'), where('facilityId', '==', facilityId), orderBy('date', 'asc')), 
+            (snapshot) => {
+              setVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+              setLoading(false);
+            }
+          );
 
-    return () => {
-      visitsUnsub();
-      patientsUnsub();
+          const patientsUnsub = onSnapshot(
+            query(collection(db, 'patients'), where('facilityId', '==', facilityId)), 
+            (snapshot) => {
+              setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
+            }
+          );
+
+          return () => {
+            visitsUnsub();
+            patientsUnsub();
+          };
+        }
+      }
     };
+    bootstrap();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setSubmitting(true);
+    setConflict(null);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       const appointmentDate = new Date(`${formData.date}T${formData.time}`);
-      await addDoc(collection(db, 'visits'), {
+      
+      // Basic Conflict Check
+      const hasConflict = visits.some(v => {
+        const vDate = new Date(v.date);
+        const diff = Math.abs(vDate.getTime() - appointmentDate.getTime());
+        return diff < 15 * 60 * 1000 && v.status === 'scheduled'; // 15 min slot
+      });
+
+      if (hasConflict) {
+        setConflict('This time slot is already booked or too close to another appointment.');
+        setSubmitting(false);
+        return;
+      }
+
+      const visitRef = await addDoc(collection(db, 'visits'), {
         patientId: formData.patientId,
         date: appointmentDate.toISOString(),
         status: 'scheduled',
         notes: formData.notes,
+        facilityId,
         createdAt: serverTimestamp()
       });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'SCHEDULE_APPOINTMENT',
+        module: 'Appointments',
+        details: `Scheduled appointment for patient ${formData.patientId} on ${formData.date} at ${formData.time}`,
+        timestamp: serverTimestamp(),
+        facilityId
+      });
+
       setIsModalOpen(false);
       setFormData({ patientId: '', date: '', time: '', notes: '' });
     } catch (error) {
@@ -70,10 +125,52 @@ const Appointments: React.FC = () => {
   };
 
   const updateStatus = async (visitId: string, status: Visit['status']) => {
+    if (!user) return;
     try {
+      const facilityId = user.facilityId || 'main-branch';
       await updateDoc(doc(db, 'visits', visitId), { status });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'UPDATE_APPOINTMENT_STATUS',
+        module: 'Appointments',
+        details: `Updated appointment ${visitId} status to ${status}`,
+        timestamp: serverTimestamp(),
+        facilityId
+      });
+      if (status === 'vitals') {
+        navigate(`/visits/${visitId}/workflow`);
+      }
     } catch (error) {
       console.error('Error updating status:', error);
+    }
+  };
+
+  const handleSendReminder = async (visit: Visit) => {
+    if (!user) return;
+    try {
+      const facilityId = user.facilityId || 'main-branch';
+      const patientName = getPatientName(visit.patientId);
+      
+      // In a real app, this would trigger an SMS/Email/WhatsApp API
+      console.log(`Sending reminder to ${patientName} for appointment on ${format(new Date(visit.date), 'PPp')}`);
+      
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'SEND_REMINDER',
+        module: 'Appointments',
+        details: `Sent appointment reminder to ${patientName} (${visit.patientId})`,
+        timestamp: serverTimestamp(),
+        facilityId
+      });
+
+      alert(`Reminder sent to ${patientName}!`);
+    } catch (error) {
+      console.error('Error sending reminder:', error);
     }
   };
 
@@ -128,6 +225,13 @@ const Appointments: React.FC = () => {
                       </p>
                     </div>
                     <div className="flex gap-2">
+                      <button
+                        onClick={() => handleSendReminder(visit)}
+                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        title="Send Reminder"
+                      >
+                        <Bell className="w-4 h-4" />
+                      </button>
                       <button 
                         onClick={() => updateStatus(visit.id, 'vitals')}
                         className="px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs font-bold hover:bg-green-100 transition-all"
@@ -194,6 +298,12 @@ const Appointments: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
+              {conflict && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-700 text-sm">
+                  <AlertCircle className="w-4 h-4" />
+                  {conflict}
+                </div>
+              )}
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Select Patient *</label>

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
+import { db, auth } from '../firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, doc, getDoc } from 'firebase/firestore';
 import { 
   UserCog, 
@@ -28,6 +28,7 @@ const Staff: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'list' | 'attendance'>('list');
+  const [user, setUser] = useState<UserProfile | null>(null);
 
   // Form state for new staff (Note: In a real app, this would also trigger Firebase Auth user creation)
   const [formData, setFormData] = useState({
@@ -40,19 +41,37 @@ const Staff: React.FC = () => {
   });
 
   useEffect(() => {
-    const staffUnsub = onSnapshot(query(collection(db, 'users'), orderBy('createdAt', 'desc')), (snapshot) => {
-      setStaff(snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile)));
-      setLoading(false);
-    });
+    const bootstrap = async () => {
+      if (auth.currentUser) {
+        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
+        if (userDoc.exists()) {
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
 
-    const attendanceUnsub = onSnapshot(query(collection(db, 'attendance'), orderBy('date', 'desc')), (snapshot) => {
-      setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
-    });
+          const staffUnsub = onSnapshot(
+            query(collection(db, 'users'), where('facilityId', '==', facilityId), orderBy('createdAt', 'desc')), 
+            (snapshot) => {
+              setStaff(snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile)));
+              setLoading(false);
+            }
+          );
 
-    return () => {
-      staffUnsub();
-      attendanceUnsub();
+          const attendanceUnsub = onSnapshot(
+            query(collection(db, 'attendance'), where('facilityId', '==', facilityId), orderBy('date', 'desc')), 
+            (snapshot) => {
+              setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
+            }
+          );
+
+          return () => {
+            staffUnsub();
+            attendanceUnsub();
+          };
+        }
+      }
     };
+    bootstrap();
   }, []);
 
   const filteredStaff = staff.filter(s => 
@@ -62,14 +81,29 @@ const Staff: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setSubmitting(true);
     try {
+      const facilityId = user.facilityId || 'main-branch';
       // In this demo, we're just adding to Firestore. 
       // In production, you'd call a cloud function or use Firebase Admin to create the Auth user.
       await addDoc(collection(db, 'users'), {
         ...formData,
+        facilityId,
         createdAt: serverTimestamp()
       });
+
+      // Audit Log
+      await addDoc(collection(db, 'audit_logs'), {
+        userId: user.uid,
+        userEmail: user.email,
+        action: 'ADD_STAFF_PROFILE',
+        module: 'Staff Management',
+        details: `Added staff profile for ${formData.displayName}`,
+        timestamp: serverTimestamp(),
+        facilityId
+      });
+
       setIsModalOpen(false);
       setFormData({
         uid: '',
@@ -155,7 +189,7 @@ const Staff: React.FC = () => {
                 <div key={member.uid} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-all group">
                   <div className="flex items-start justify-between mb-4">
                     <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-lg">
-                      {member.displayName?.charAt(0) || member.email.charAt(0)}
+                      {member.displayName?.charAt(0) || member.fullName?.charAt(0) || member.email?.charAt(0) || '?'}
                     </div>
                     <span className={cn(
                       "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
@@ -218,13 +252,37 @@ const Staff: React.FC = () => {
                           <p className="text-xs text-gray-500 capitalize">{member?.role}</p>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="text-sm text-gray-600">{format(new Date(log.date), 'PP')}</p>
+                          <p className="text-sm text-gray-600">
+                            {(() => {
+                              try {
+                                if (!log.date) return '-';
+                                const date = (log.date as any).toDate ? (log.date as any).toDate() : new Date(log.date);
+                                return isNaN(date.getTime()) ? '-' : format(date, 'PP');
+                              } catch (e) { return '-'; }
+                            })()}
+                          </p>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="text-sm text-gray-600">{format(new Date(log.clockIn), 'p')}</p>
+                          <p className="text-sm text-gray-600">
+                            {(() => {
+                              try {
+                                if (!log.clockIn) return '-';
+                                const date = (log.clockIn as any).toDate ? (log.clockIn as any).toDate() : new Date(log.clockIn);
+                                return isNaN(date.getTime()) ? '-' : format(date, 'p');
+                              } catch (e) { return '-'; }
+                            })()}
+                          </p>
                         </td>
                         <td className="px-6 py-4">
-                          <p className="text-sm text-gray-600">{log.clockOut ? format(new Date(log.clockOut), 'p') : '-'}</p>
+                          <p className="text-sm text-gray-600">
+                            {(() => {
+                              try {
+                                if (!log.clockOut) return '-';
+                                const date = (log.clockOut as any).toDate ? (log.clockOut as any).toDate() : new Date(log.clockOut);
+                                return isNaN(date.getTime()) ? '-' : format(date, 'p');
+                              } catch (e) { return '-'; }
+                            })()}
+                          </p>
                         </td>
                         <td className="px-6 py-4 text-right">
                           <span className={cn(

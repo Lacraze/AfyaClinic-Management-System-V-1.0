@@ -33,32 +33,41 @@ const ClinicalNotes: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchUser = async () => {
+    const bootstrap = async () => {
       if (auth.currentUser) {
         const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
         if (userDoc.exists()) {
-          setUser(userDoc.data() as UserProfile);
+          const userData = userDoc.data() as UserProfile;
+          setUser(userData);
+          const facilityId = userData.facilityId || 'main-branch';
+
+          const visitsUnsub = onSnapshot(
+            query(
+              collection(db, 'visits'), 
+              where('facilityId', '==', facilityId),
+              where('status', 'in', ['checked-in', 'vitals', 'history', 'encounter', 'billing'])
+            ),
+            (snapshot) => {
+              setActiveVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+              setLoading(false);
+            }
+          );
+
+          const patientsUnsub = onSnapshot(
+            query(collection(db, 'patients'), where('facilityId', '==', facilityId)), 
+            (snapshot) => {
+              setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
+            }
+          );
+
+          return () => {
+            visitsUnsub();
+            patientsUnsub();
+          };
         }
       }
     };
-    fetchUser();
-
-    const visitsUnsub = onSnapshot(
-      query(collection(db, 'visits'), where('status', 'in', ['checked-in', 'vitals', 'history', 'encounter', 'billing'])),
-      (snapshot) => {
-        setActiveVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
-        setLoading(false);
-      }
-    );
-
-    const patientsUnsub = onSnapshot(collection(db, 'patients'), (snapshot) => {
-      setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
-    });
-
-    return () => {
-      visitsUnsub();
-      patientsUnsub();
-    };
+    bootstrap();
   }, []);
 
   const handleSelectVisit = (visit: Visit) => {
