@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { logOut, db, auth } from '../firebase';
-import { onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { logOut, db } from '../firebase';
+import { doc, updateDoc } from 'firebase/firestore';
 import { 
   LayoutDashboard, 
   Users, 
@@ -21,72 +20,88 @@ import {
   Sun,
   Moon,
   Package,
-  UserPlus
+  UserPlus,
+  Building2,
+  ChevronDown
 } from 'lucide-react';
-import { UserProfile, UserRole } from '../types';
+import { UserProfile, UserRole, Clinic } from '../types';
 import { cn } from '../lib/utils';
 import { useTheme } from '../context/ThemeContext';
-import { collection, query, limit, onSnapshot, updateDoc } from 'firebase/firestore';
+import { collection, query, limit, onSnapshot, where, getDocs } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 
 interface LayoutProps {
   children: React.ReactNode;
 }
 
 const Layout: React.FC<LayoutProps> = ({ children }) => {
-  const [user, setUser] = useState<UserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { profile, loading, switchClinic } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [activeStaff, setActiveStaff] = useState<UserProfile[]>([]);
+  const [allClinics, setAllClinics] = useState<Clinic[]>([]);
+  const [isClinicSwitcherOpen, setIsClinicSwitcherOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-        if (userDoc.exists()) {
-          setUser(userDoc.data() as UserProfile);
-        }
-      } else {
-        setUser(null);
-        navigate('/login');
-      }
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [navigate]);
+    if (!loading && !profile) {
+      navigate('/login');
+    }
+  }, [loading, profile, navigate]);
 
   useEffect(() => {
     const bootstrapAdmin = async () => {
-      if (user && user.email === 'klacraze@gmail.com' && user.role !== 'admin') {
-        try {
-          await updateDoc(doc(db, 'users', user.uid), { role: 'admin' });
-          setUser(prev => prev ? { ...prev, role: 'admin' } : null);
-        } catch (err) {
-          console.error('Admin bootstrap failed:', err);
+      if (profile && profile.email === 'klacraze@gmail.com') {
+        const updates: any = {};
+        if (profile.role !== 'admin') updates.role = 'admin';
+        if (!profile.clinicId) updates.clinicId = 'main-branch';
+        
+        if (Object.keys(updates).length > 0) {
+          try {
+            await updateDoc(doc(db, 'users', profile.uid), updates);
+          } catch (err) {
+            console.error('Admin bootstrap failed:', err);
+          }
         }
       }
     };
     bootstrapAdmin();
 
-    if (user?.role === 'admin') {
-      const q = query(collection(db, 'users'), limit(5));
-      const unsub = onSnapshot(q, (snapshot) => {
-        setActiveStaff(snapshot.docs
-          .map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile))
-          .filter(u => u.uid !== user.uid)
-        );
+    if (profile?.role === 'admin') {
+      // Load all clinics for the switcher
+      const qClinics = query(collection(db, 'clinics'));
+      const unsubClinics = onSnapshot(qClinics, (snapshot) => {
+        setAllClinics(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Clinic)));
       });
-      return () => unsub();
+
+      if (profile.clinicId) {
+        const q = query(
+          collection(db, 'users'), 
+          where('clinicId', '==', profile.clinicId),
+          limit(5)
+        );
+        const unsub = onSnapshot(q, (snapshot) => {
+          setActiveStaff(snapshot.docs
+            .map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile))
+            .filter(u => u.uid !== profile.uid)
+          );
+        });
+        return () => {
+          unsubClinics();
+          unsub();
+        };
+      }
+      return () => unsubClinics();
     }
-  }, [user]);
+  }, [profile]);
 
   const handleLogout = async () => {
     await logOut();
     navigate('/login');
   };
+
+  const currentClinic = allClinics.find(c => c.id === profile?.clinicId);
 
   const navItems = [
     { name: 'Dashboard', path: '/', icon: LayoutDashboard, roles: ['admin', 'doctor', 'nurse', 'receptionist', 'pharmacist', 'accountant', 'lab_tech', 'hr'] },
@@ -96,6 +111,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Clinical Notes', path: '/clinical', icon: ClipboardList, roles: ['admin', 'doctor', 'nurse'] },
     { name: 'Pharmacy', path: '/pharmacy', icon: Pill, roles: ['admin', 'pharmacist', 'doctor'] },
     { name: 'Billing', path: '/billing', icon: Receipt, roles: ['admin', 'accountant', 'receptionist'] },
+    { name: 'Clinics', path: '/clinics', icon: Building2, roles: ['admin'] },
     { name: 'Manage Staff', path: '/manage-staff', icon: Shield, roles: ['admin'] },
     { name: 'Staff List', path: '/staff', icon: UserCog, roles: ['admin', 'hr'] },
     { name: 'Utilities', path: '/utilities', icon: Zap, roles: ['admin', 'accountant'] },
@@ -103,7 +119,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
     { name: 'Audit Logs', path: '/audit-logs', icon: Shield, roles: ['admin'] },
   ];
 
-  const filteredNavItems = navItems.filter(item => user && item.roles.includes(user.role));
+  const filteredNavItems = navItems.filter(item => profile && item.roles.includes(profile.role));
 
   if (loading) {
     return (
@@ -141,6 +157,51 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </button>
           </div>
 
+          {/* Clinic Switcher (Admin Only) */}
+          {profile?.role === 'admin' && allClinics.length > 0 && (
+            <div className="px-4 mb-4">
+              <div className="relative">
+                <button
+                  onClick={() => setIsClinicSwitcherOpen(!isClinicSwitcherOpen)}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-700 transition-all group"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Building2 className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                    <span className="text-xs font-bold text-gray-700 dark:text-gray-300 truncate">
+                      {currentClinic?.name || 'Select Clinic'}
+                    </span>
+                  </div>
+                  <ChevronDown className={cn(
+                    "w-4 h-4 text-gray-400 transition-transform",
+                    isClinicSwitcherOpen && "rotate-180"
+                  )} />
+                </button>
+
+                {isClinicSwitcherOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-xl z-40 max-h-48 overflow-y-auto py-1">
+                    {allClinics.map((clinic) => (
+                      <button
+                        key={clinic.id}
+                        onClick={() => {
+                          switchClinic(clinic.id);
+                          setIsClinicSwitcherOpen(false);
+                        }}
+                        className={cn(
+                          "w-full text-left px-3 py-2 text-xs transition-colors",
+                          profile.clinicId === clinic.id
+                            ? "bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 font-bold"
+                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700"
+                        )}
+                      >
+                        {clinic.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
             {filteredNavItems.map((item) => (
               <Link
@@ -167,14 +228,14 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
               {/* Current User (Admin) */}
               <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50">
                 <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm ring-2 ring-blue-100 dark:ring-blue-900/50">
-                  {user?.fullName?.charAt(0) || user?.displayName?.charAt(0) || user?.email?.charAt(0) || '?'}
+                  {profile?.fullName?.charAt(0) || profile?.displayName?.charAt(0) || profile?.email?.charAt(0) || '?'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-gray-900 dark:text-white truncate leading-tight">{user?.fullName || user?.displayName || user?.email || 'Admin'}</p>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white truncate leading-tight">{profile?.fullName || profile?.displayName || profile?.email || 'Admin'}</p>
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                     <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-tighter">
-                      {user?.facilityId?.replace('-', ' ') || 'Main Branch'}
+                      {currentClinic?.name || profile?.clinicId?.replace('-', ' ') || 'Main Branch'}
                     </p>
                   </div>
                 </div>

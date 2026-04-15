@@ -1,18 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { signupWithEmailPassword } from '../firebase';
-import { UserRole } from '../types';
+import { signupWithEmailPassword, db } from '../firebase';
+import { UserRole, Clinic } from '../types';
 import { Stethoscope, Loader2, AlertCircle } from 'lucide-react';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 const Signup: React.FC = () => {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState<UserRole>('receptionist');
-  const [facilityId, setFacilityId] = useState('main-branch');
+  const [clinicId, setClinicId] = useState('');
+  const [clinics, setClinics] = useState<Clinic[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingClinics, setLoadingClinics] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchClinics = async () => {
+      try {
+        const q = query(collection(db, 'clinics'), orderBy('name', 'asc'));
+        const snapshot = await getDocs(q);
+        const fetchedClinics = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Clinic));
+        setClinics(fetchedClinics);
+        if (fetchedClinics.length > 0) {
+          setClinicId(fetchedClinics[0].id);
+        }
+      } catch (err) {
+        console.error('Error fetching clinics:', err);
+      } finally {
+        setLoadingClinics(false);
+      }
+    };
+    fetchClinics();
+  }, []);
 
   const roleDescriptions: Record<UserRole, string> = {
     admin: 'Full system access, staff management, and clinical oversight.',
@@ -31,7 +53,7 @@ const Signup: React.FC = () => {
     setError(null);
 
     try {
-      await signupWithEmailPassword(email, password, fullName, role, facilityId);
+      await signupWithEmailPassword(email, password, fullName, role, clinicId);
       navigate('/login', { state: { message: 'Account created successfully! Please log in.' } });
     } catch (err: any) {
       console.error('Signup error:', err);
@@ -40,7 +62,17 @@ const Signup: React.FC = () => {
       } else if (err.code === 'auth/email-already-in-use') {
         setError('An account with this email already exists. Please sign in instead.');
       } else {
-        setError(err.message || 'An unexpected error occurred. Please try again.');
+        // Check if it's a JSON error from handleFirestoreError
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed.error) {
+            setError(`Database error: ${parsed.error}`);
+          } else {
+            setError(err.message || 'An unexpected error occurred. Please try again.');
+          }
+        } catch {
+          setError(err.message || 'An unexpected error occurred. Please try again.');
+        }
       }
     } finally {
       setLoading(false);
@@ -139,22 +171,28 @@ const Signup: React.FC = () => {
             </div>
 
             <div>
-              <label htmlFor="facility" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                Assigned Facility / Branch
+              <label htmlFor="clinic" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Assigned Clinic / Branch
               </label>
               <div className="mt-1">
                 <select
-                  id="facility"
-                  name="facility"
+                  id="clinic"
+                  name="clinic"
                   required
-                  value={facilityId}
-                  onChange={(e) => setFacilityId(e.target.value)}
-                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-700 dark:text-white"
+                  disabled={loadingClinics}
+                  value={clinicId}
+                  onChange={(e) => setClinicId(e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm dark:bg-gray-700 dark:text-white disabled:opacity-50"
                 >
-                  <option value="main-branch">Main Branch (Nairobi)</option>
-                  <option value="mombasa-branch">Mombasa Branch</option>
-                  <option value="kisumu-branch">Kisumu Branch</option>
-                  <option value="nakuru-branch">Nakuru Branch</option>
+                  {loadingClinics ? (
+                    <option>Loading clinics...</option>
+                  ) : clinics.length > 0 ? (
+                    clinics.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))
+                  ) : (
+                    <option value="">No clinics available</option>
+                  )}
                 </select>
               </div>
             </div>

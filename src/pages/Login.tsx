@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { loginWithEmailPassword, signInWithGoogle, db } from '../firebase';
+import { loginWithEmailPassword, signInWithGoogle, db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { Activity, Mail, Lock, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 
@@ -59,9 +59,15 @@ const Login: React.FC = () => {
 
     try {
       const user = await loginWithEmailPassword(email, password);
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      const path = `users/${user.uid}`;
+      let userDoc;
+      try {
+        userDoc = await getDoc(doc(db, 'users', user.uid));
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.GET, path);
+      }
       
-      if (!userDoc.exists()) {
+      if (!userDoc || !userDoc.exists()) {
         setError('Your staff profile is missing or incomplete. Please contact the system administrator.');
         setLoading(false);
         return;
@@ -77,7 +83,17 @@ const Login: React.FC = () => {
       } else if (err.code === 'auth/operation-not-allowed') {
         setError('Email/password sign-in is not enabled. Please contact the system administrator.');
       } else {
-        setError('An unexpected error occurred. Please try again.');
+        // Check if it's a JSON error from handleFirestoreError
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed.error) {
+            setError(`Database error: ${parsed.error}`);
+          } else {
+            setError('An unexpected error occurred. Please try again.');
+          }
+        } catch {
+          setError('An unexpected error occurred. Please try again.');
+        }
       }
     } finally {
       setLoading(false);
@@ -89,8 +105,15 @@ const Login: React.FC = () => {
     setError(null);
     try {
       const user = await signInWithGoogle();
-      const userDoc = await getDoc(doc(db, 'users', user.uid));
-      if (userDoc.exists()) {
+      const path = `users/${user.uid}`;
+      let userDoc;
+      try {
+        userDoc = await getDoc(doc(db, 'users', user.uid));
+      } catch (err: any) {
+        handleFirestoreError(err, OperationType.GET, path);
+      }
+
+      if (userDoc && userDoc.exists()) {
         handleRoleBasedRedirect(userDoc.data().role);
       }
     } catch (err: any) {

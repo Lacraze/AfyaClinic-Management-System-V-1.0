@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db, auth } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { 
   User, 
@@ -21,60 +21,81 @@ import {
   Weight,
   Heart
 } from 'lucide-react';
-import { Patient, Visit, UserProfile, Vitals, Encounter } from '../types';
+import { Patient, Visit, Vitals, Encounter } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 const PatientDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [patient, setPatient] = useState<Patient | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<'history' | 'vitals' | 'encounters' | 'billing'>('history');
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!id) return;
-
-      // Fetch patient
-      const patientDoc = await getDoc(doc(db, 'patients', id));
-      if (patientDoc.exists()) {
-        setPatient({ id: patientDoc.id, ...patientDoc.data() } as Patient);
-      } else {
-        navigate('/patients');
+      if (!id || !profile?.clinicId) {
+        if (profile) setLoading(false);
         return;
       }
 
-      // Fetch user role
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          setUser(userDoc.data() as UserProfile);
+      const clinicId = profile.clinicId;
+
+      try {
+        // Fetch patient
+        const patientDoc = await getDoc(doc(db, 'patients', id));
+        if (patientDoc.exists()) {
+          const patientData = { id: patientDoc.id, ...patientDoc.data() } as Patient;
+          
+          // Verify clinicId
+          if (patientData.clinicId !== clinicId) {
+            navigate('/patients');
+            return;
+          }
+          
+          setPatient(patientData);
+        } else {
+          navigate('/patients');
+          return;
         }
-      }
 
-      // Fetch visits
-      const q = query(collection(db, 'visits'), where('patientId', '==', id), orderBy('date', 'desc'));
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        setVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+        // Fetch visits
+        const q = query(
+          collection(db, 'visits'), 
+          where('clinicId', '==', clinicId),
+          where('patientId', '==', id), 
+          orderBy('date', 'desc')
+        );
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+          setVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+          setLoading(false);
+        }, (err) => {
+          handleFirestoreError(err, OperationType.LIST, 'visits');
+          setLoading(false);
+        });
+
+        return () => unsubscribe();
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, `patients/${id}`);
         setLoading(false);
-      });
-
-      return () => unsubscribe();
+      }
     };
 
     fetchData();
-  }, [id, navigate]);
+  }, [id, navigate, profile?.clinicId]);
 
   const handleCreateVisit = async () => {
-    if (!id) return;
+    if (!id || !profile) return;
     try {
+      const clinicId = profile.clinicId;
       const docRef = await addDoc(collection(db, 'visits'), {
         patientId: id,
         date: new Date().toISOString(),
         status: 'vitals',
+        clinicId,
         createdAt: serverTimestamp()
       });
       navigate(`/visits/${docRef.id}/workflow`);

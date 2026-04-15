@@ -5,6 +5,7 @@
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './context/ThemeContext';
+import { AuthProvider } from './context/AuthContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
@@ -23,22 +24,24 @@ import Reports from './pages/Reports';
 import VisitWorkflow from './pages/VisitWorkflow';
 import Inventory from './pages/Inventory';
 import AuditLogs from './pages/AuditLogs';
+import Clinics from './pages/Clinics';
 
 export default function App() {
   return (
     <ThemeProvider>
-      <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          
-          <Route path="/" element={
-            <ProtectedRoute>
-              <Layout>
-                <Dashboard />
-              </Layout>
-            </ProtectedRoute>
-          } />
+      <AuthProvider>
+        <Router>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            
+            <Route path="/" element={
+              <ProtectedRoute>
+                <Layout>
+                  <Dashboard />
+                </Layout>
+              </ProtectedRoute>
+            } />
 
         <Route path="/patients" element={
           <ProtectedRoute allowedRoles={['admin', 'doctor', 'nurse', 'receptionist']}>
@@ -144,9 +147,18 @@ export default function App() {
           </ProtectedRoute>
         } />
 
+        <Route path="/clinics" element={
+          <ProtectedRoute allowedRoles={['admin']}>
+            <Layout>
+              <Clinics />
+            </Layout>
+          </ProtectedRoute>
+        } />
+
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       </Router>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

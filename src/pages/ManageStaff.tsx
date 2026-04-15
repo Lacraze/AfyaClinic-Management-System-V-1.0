@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
 import { collection, onSnapshot, doc, updateDoc, query, orderBy, where, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { UserProfile, UserRole } from '../types';
 import { 
@@ -15,14 +15,15 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 const ManageStaff: React.FC = () => {
+  const { profile } = useAuth();
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [updatingUid, setUpdatingUid] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [user, setUser] = useState<UserProfile | null>(null);
 
   const roleDescriptions: Record<UserRole, string> = {
     admin: 'Full system access, staff management, and clinical oversight.',
@@ -36,59 +37,51 @@ const ManageStaff: React.FC = () => {
   };
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId) return;
 
-          const q = query(
-            collection(db, 'users'), 
-            where('facilityId', '==', facilityId),
-            orderBy('createdAt', 'desc')
-          );
-          
-          const unsubscribe = onSnapshot(q, (snapshot) => {
-            const staffData = snapshot.docs.map(doc => ({
-              ...doc.data(),
-              uid: doc.id
-            })) as UserProfile[];
-            setStaff(staffData);
-            setLoading(false);
-          }, (err) => {
-            console.error('Error fetching staff:', err);
-            setError('You do not have permission to view staff records.');
-            setLoading(false);
-          });
+    const clinicId = profile.clinicId;
 
-          return () => unsubscribe();
-        }
-      }
-    };
-    bootstrap();
-  }, []);
+    const q = query(
+      collection(db, 'users'), 
+      where('clinicId', '==', clinicId),
+      orderBy('createdAt', 'desc')
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const staffData = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        uid: doc.id
+      })) as UserProfile[];
+      setStaff(staffData);
+      setLoading(false);
+    }, (err) => {
+      console.error('Error fetching staff:', err);
+      setError('You do not have permission to view staff records.');
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [profile?.clinicId]);
 
   const handleRoleChange = async (uid: string, newRole: UserRole) => {
-    if (!user) return;
+    if (!profile) return;
     setUpdatingUid(uid);
     setError(null);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       await updateDoc(doc(db, 'users', uid), {
         role: newRole
       });
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'UPDATE_STAFF_ROLE',
         module: 'Staff Management',
         details: `Updated role for user ${uid} to ${newRole}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
     } catch (err: any) {
       console.error('Error updating role:', err);
@@ -99,11 +92,11 @@ const ManageStaff: React.FC = () => {
   };
 
   const handleStatusToggle = async (uid: string, currentStatus: 'active' | 'inactive') => {
-    if (!user) return;
+    if (!profile) return;
     setUpdatingUid(uid);
     setError(null);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
       await updateDoc(doc(db, 'users', uid), {
         status: newStatus
@@ -111,13 +104,13 @@ const ManageStaff: React.FC = () => {
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'UPDATE_STAFF_STATUS',
         module: 'Staff Management',
         details: `Updated status for user ${uid} to ${newStatus}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
     } catch (err: any) {
       console.error('Error updating status:', err);

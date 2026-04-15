@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, getDoc, doc, updateDoc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, getDoc, doc, updateDoc, limit, startAfter, getDocs, QueryDocumentSnapshot } from 'firebase/firestore';
 import { 
   Receipt, 
   Search, 
@@ -20,21 +20,24 @@ import {
   FileText,
   ChevronRight
 } from 'lucide-react';
-import { Invoice, Payment, Visit, UserProfile } from '../types';
+import { Invoice, Payment, Visit } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
-import { auth } from '../firebase';
+import { useAuth } from '../context/AuthContext';
 
 const Billing: React.FC = () => {
+  const { profile } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [pendingVisits, setPendingVisits] = useState<(Visit & { patientName: string })[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [activeTab, setActiveTab] = useState<'revenue' | 'outstanding' | 'paid' | 'unpaid' | 'pending'>('outstanding');
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [paymentForm, setPaymentForm] = useState({
     amount: 0,
     method: 'cash' as Payment['method'],
@@ -42,52 +45,92 @@ const Billing: React.FC = () => {
   });
   const navigate = useNavigate();
 
+  const PAGE_SIZE = 20;
+
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const invoicesUnsub = onSnapshot(
-            query(collection(db, 'invoices'), where('facilityId', '==', facilityId), orderBy('createdAt', 'desc')), 
-            (snapshot) => {
-              setInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice)));
-              setLoading(false);
-            }
-          );
+    const clinicId = profile.clinicId;
 
-          const paymentsUnsub = onSnapshot(
-            query(collection(db, 'payments'), where('facilityId', '==', facilityId), orderBy('date', 'desc')), 
-            (snapshot) => {
-              setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
-            }
-          );
-
-          const pendingVisitsUnsub = onSnapshot(
-            query(collection(db, 'visits'), where('facilityId', '==', facilityId), where('status', '==', 'billing')), 
-            async (snapshot) => {
-              const visits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
-              const visitsWithNames = await Promise.all(visits.map(async (v) => {
-                const patientDoc = await getDoc(doc(db, 'patients', v.patientId));
-                return { ...v, patientName: patientDoc.exists() ? patientDoc.data().fullName : 'Unknown' };
-              }));
-              setPendingVisits(visitsWithNames);
-            }
-          );
-
-          return () => {
-            invoicesUnsub();
-            paymentsUnsub();
-            pendingVisitsUnsub();
-          };
-        }
+    const invoicesUnsub = onSnapshot(
+      query(
+        collection(db, 'invoices'), 
+        where('clinicId', '==', clinicId), 
+        orderBy('createdAt', 'desc'),
+        limit(PAGE_SIZE)
+      ), 
+      (snapshot) => {
+        setInvoices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice)));
+        setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+        setHasMore(snapshot.docs.length === PAGE_SIZE);
+        setLoading(false);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'invoices');
+        setLoading(false);
       }
+    );
+
+    const paymentsUnsub = onSnapshot(
+      query(collection(db, 'payments'), where('clinicId', '==', clinicId), orderBy('date', 'desc')), 
+      (snapshot) => {
+        setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'payments');
+      }
+    );
+
+    const pendingVisitsUnsub = onSnapshot(
+      query(collection(db, 'visits'), where('clinicId', '==', clinicId), where('status', '==', 'billing')), 
+      async (snapshot) => {
+        const visits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
+        const visitsWithNames = await Promise.all(visits.map(async (v) => {
+          const patientDoc = await getDoc(doc(db, 'patients', v.patientId));
+          return { ...v, patientName: patientDoc.exists() ? patientDoc.data().fullName : 'Unknown' };
+        }));
+        setPendingVisits(visitsWithNames);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'visits');
+      }
+    );
+
+    return () => {
+      invoicesUnsub();
+      paymentsUnsub();
+      pendingVisitsUnsub();
     };
-    bootstrap();
-  }, []);
+  }, [profile?.clinicId]);
+
+  const loadMore = async () => {
+    if (!profile?.clinicId || !lastDoc || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const q = query(
+        collection(db, 'invoices'),
+        where('clinicId', '==', profile.clinicId),
+        orderBy('createdAt', 'desc'),
+        startAfter(lastDoc),
+        limit(PAGE_SIZE)
+      );
+
+      const snapshot = await getDocs(q);
+      const newInvoices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
+      
+      setInvoices(prev => [...prev, ...newInvoices]);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+    } catch (error) {
+      console.error("Error loading more invoices:", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const filteredInvoices = invoices.filter(i => 
     i.patientId.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -133,7 +176,7 @@ const Billing: React.FC = () => {
           <div class="header">
             <div class="clinic-info">
               <h1>AfyaClinic</h1>
-              <p>${user?.facilityId || 'Main Branch'}</p>
+              <p>${profile?.clinicId || 'Main Branch'}</p>
             </div>
             <div class="invoice-info">
               <h2>INVOICE</h2>
@@ -186,10 +229,10 @@ const Billing: React.FC = () => {
 
   const handleRecordPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedInvoice || !user) return;
+    if (!selectedInvoice || !profile) return;
 
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       // Add payment record
       await addDoc(collection(db, 'payments'), {
         invoiceId: selectedInvoice.id,
@@ -197,18 +240,18 @@ const Billing: React.FC = () => {
         method: paymentForm.method,
         reference: paymentForm.reference,
         date: new Date().toISOString(),
-        facilityId
+        clinicId
       });
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'RECORD_PAYMENT',
         module: 'Billing',
         details: `Recorded payment of KES ${paymentForm.amount} for invoice ${selectedInvoice.id}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
 
       // Update invoice status
@@ -563,6 +606,17 @@ const Billing: React.FC = () => {
                   })}
                 </tbody>
               </table>
+              {hasMore && (
+                <div className="p-4 border-t border-gray-100 flex justify-center">
+                  <button
+                    onClick={loadMore}
+                    disabled={loadingMore}
+                    className="px-6 py-2 bg-gray-50 text-gray-600 rounded-xl font-semibold hover:bg-gray-100 transition-all disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load More Invoices'}
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="p-12 text-center text-gray-500">

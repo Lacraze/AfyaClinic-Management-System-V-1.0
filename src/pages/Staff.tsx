@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, auth } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, doc, getDoc } from 'firebase/firestore';
 import { 
   UserCog, 
@@ -19,8 +19,10 @@ import {
 import { UserProfile, UserRole, Attendance } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 const Staff: React.FC = () => {
+  const { profile } = useAuth();
   const [staff, setStaff] = useState<UserProfile[]>([]);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -28,7 +30,6 @@ const Staff: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'list' | 'attendance'>('list');
-  const [user, setUser] = useState<UserProfile | null>(null);
 
   // Form state for new staff (Note: In a real app, this would also trigger Firebase Auth user creation)
   const [formData, setFormData] = useState({
@@ -41,38 +42,40 @@ const Staff: React.FC = () => {
   });
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const staffUnsub = onSnapshot(
-            query(collection(db, 'users'), where('facilityId', '==', facilityId), orderBy('createdAt', 'desc')), 
-            (snapshot) => {
-              setStaff(snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile)));
-              setLoading(false);
-            }
-          );
+    const clinicId = profile.clinicId;
 
-          const attendanceUnsub = onSnapshot(
-            query(collection(db, 'attendance'), where('facilityId', '==', facilityId), orderBy('date', 'desc')), 
-            (snapshot) => {
-              setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
-            }
-          );
-
-          return () => {
-            staffUnsub();
-            attendanceUnsub();
-          };
-        }
+    const staffUnsub = onSnapshot(
+      query(collection(db, 'users'), where('clinicId', '==', clinicId), orderBy('createdAt', 'desc')), 
+      (snapshot) => {
+        setStaff(snapshot.docs.map(doc => ({ ...doc.data() } as UserProfile)));
+        setLoading(false);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'users');
+        setLoading(false);
       }
+    );
+
+    const attendanceUnsub = onSnapshot(
+      query(collection(db, 'attendance'), where('clinicId', '==', clinicId), orderBy('date', 'desc')), 
+      (snapshot) => {
+        setAttendance(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Attendance)));
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'attendance');
+      }
+    );
+
+    return () => {
+      staffUnsub();
+      attendanceUnsub();
     };
-    bootstrap();
-  }, []);
+  }, [profile?.clinicId]);
 
   const filteredStaff = staff.filter(s => 
     s.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -81,27 +84,27 @@ const Staff: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!profile) return;
     setSubmitting(true);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       // In this demo, we're just adding to Firestore. 
       // In production, you'd call a cloud function or use Firebase Admin to create the Auth user.
       await addDoc(collection(db, 'users'), {
         ...formData,
-        facilityId,
+        clinicId,
         createdAt: serverTimestamp()
       });
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'ADD_STAFF_PROFILE',
         module: 'Staff Management',
         details: `Added staff profile for ${formData.displayName}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
 
       setIsModalOpen(false);

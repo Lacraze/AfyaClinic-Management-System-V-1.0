@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -19,56 +19,49 @@ import {
   Save,
   Users
 } from 'lucide-react';
-import { Visit, Patient, UserProfile, Vitals, Encounter } from '../types';
+import { Visit, Patient, Vitals, Encounter } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 const ClinicalNotes: React.FC = () => {
+  const { profile } = useAuth();
   const [activeVisits, setActiveVisits] = useState<Visit[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedVisit, setSelectedVisit] = useState<Visit | null>(null);
-  const [user, setUser] = useState<UserProfile | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId) return;
 
-          const visitsUnsub = onSnapshot(
-            query(
-              collection(db, 'visits'), 
-              where('facilityId', '==', facilityId),
-              where('status', 'in', ['checked-in', 'vitals', 'history', 'encounter', 'billing'])
-            ),
-            (snapshot) => {
-              setActiveVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
-              setLoading(false);
-            }
-          );
+    const clinicId = profile.clinicId;
 
-          const patientsUnsub = onSnapshot(
-            query(collection(db, 'patients'), where('facilityId', '==', facilityId)), 
-            (snapshot) => {
-              setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
-            }
-          );
-
-          return () => {
-            visitsUnsub();
-            patientsUnsub();
-          };
-        }
+    const visitsUnsub = onSnapshot(
+      query(
+        collection(db, 'visits'), 
+        where('clinicId', '==', clinicId),
+        where('status', 'in', ['checked-in', 'vitals', 'history', 'encounter', 'billing'])
+      ),
+      (snapshot) => {
+        setActiveVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+        setLoading(false);
       }
+    );
+
+    const patientsUnsub = onSnapshot(
+      query(collection(db, 'patients'), where('clinicId', '==', clinicId)), 
+      (snapshot) => {
+        setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
+      }
+    );
+
+    return () => {
+      visitsUnsub();
+      patientsUnsub();
     };
-    bootstrap();
-  }, []);
+  }, [profile?.clinicId]);
 
   const handleSelectVisit = (visit: Visit) => {
     navigate(`/visits/${visit.id}/workflow`);

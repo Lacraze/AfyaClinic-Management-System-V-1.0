@@ -11,9 +11,10 @@
         "role": { "type": "string", "enum": ["admin", "doctor", "nurse", "receptionist", "pharmacist", "accountant"] },
         "status": { "type": "string", "enum": ["active", "inactive"] },
         "phoneNumber": { "type": "string" },
+        "clinicId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "email", "role", "status"]
+      "required": ["uid", "email", "role", "status", "clinicId"]
     },
     "Patient": {
       "title": "Patient Record",
@@ -30,9 +31,10 @@
         "nextOfKin": { "type": "string" },
         "insuranceProvider": { "type": "string" },
         "insuranceNumber": { "type": "string" },
+        "clinicId": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["fullName", "idNumber", "phoneNumber", "dateOfBirth", "gender"]
+      "required": ["fullName", "idNumber", "phoneNumber", "dateOfBirth", "gender", "clinicId"]
     },
     "Visit": {
       "title": "Patient Visit",
@@ -41,6 +43,7 @@
       "properties": {
         "id": { "type": "string" },
         "patientId": { "type": "string" },
+        "clinicId": { "type": "string" },
         "date": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["scheduled", "checked-in", "vitals", "history", "encounter", "billing", "completed", "no-show"] },
         "vitals": {
@@ -80,7 +83,7 @@
           }
         }
       },
-      "required": ["patientId", "date", "status"]
+      "required": ["patientId", "date", "status", "clinicId"]
     },
     "InventoryItem": {
       "title": "Inventory Item",
@@ -100,9 +103,10 @@
         "type": { "type": "string", "enum": ["drug", "equipment", "other"] },
         "buyingPrice": { "type": "number" },
         "sellingPrice": { "type": "number" },
-        "unit": { "type": "string" }
+        "unit": { "type": "string" },
+        "clinicId": { "type": "string" }
       },
-      "required": ["name", "stockQuantity", "type"]
+      "required": ["name", "stockQuantity", "type", "clinicId"]
     },
     "Prescription": {
       "title": "Prescription",
@@ -112,6 +116,7 @@
         "id": { "type": "string" },
         "visitId": { "type": "string" },
         "patientId": { "type": "string" },
+        "clinicId": { "type": "string" },
         "drugId": { "type": "string" },
         "drugName": { "type": "string" },
         "dosage": { "type": "string" },
@@ -125,7 +130,7 @@
         "prescribedBy": { "type": "string" },
         "prescribedAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["visitId", "patientId", "drugId", "quantity", "status"]
+      "required": ["visitId", "patientId", "drugId", "quantity", "status", "clinicId"]
     },
     "Invoice": {
       "title": "Billing Invoice",
@@ -135,6 +140,7 @@
         "id": { "type": "string" },
         "patientId": { "type": "string" },
         "visitId": { "type": "string" },
+        "clinicId": { "type": "string" },
         "items": {
           "type": "array",
           "items": {
@@ -153,7 +159,7 @@
         "status": { "type": "string", "enum": ["unpaid", "partially-paid", "paid"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["patientId", "visitId", "total", "status"]
+      "required": ["patientId", "visitId", "total", "status", "clinicId"]
     },
     "Payment": {
       "title": "Payment Record",
@@ -162,12 +168,13 @@
       "properties": {
         "id": { "type": "string" },
         "invoiceId": { "type": "string" },
+        "clinicId": { "type": "string" },
         "amount": { "type": "number" },
         "method": { "type": "string", "enum": ["cash", "mpesa", "card", "insurance"] },
         "reference": { "type": "string" },
         "date": { "type": "string", "format": "date-time" }
       },
-      "required": ["invoiceId", "amount", "method", "date"]
+      "required": ["invoiceId", "amount", "method", "date", "clinicId"]
     },
     "Utility": {
       "title": "Utility Bill",
@@ -177,11 +184,12 @@
         "id": { "type": "string" },
         "type": { "type": "string", "enum": ["electricity", "water", "internet", "rent", "other"] },
         "amount": { "type": "number" },
+        "clinicId": { "type": "string" },
         "dueDate": { "type": "string", "format": "date" },
         "status": { "type": "string", "enum": ["unpaid", "paid"] },
         "notes": { "type": "string" }
       },
-      "required": ["type", "amount", "dueDate", "status"]
+      "required": ["type", "amount", "dueDate", "status", "clinicId"]
     },
     "Attendance": {
       "title": "Staff Attendance",
@@ -190,11 +198,12 @@
       "properties": {
         "id": { "type": "string" },
         "uid": { "type": "string" },
+        "clinicId": { "type": "string" },
         "date": { "type": "string", "format": "date" },
         "clockIn": { "type": "string", "format": "date-time" },
         "clockOut": { "type": "string", "format": "date-time" }
       },
-      "required": ["uid", "date", "clockIn"]
+      "required": ["uid", "date", "clockIn", "clinicId"]
     }
   },
   "firestore": {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { db, auth } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, getDoc, updateDoc, serverTimestamp, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import { 
   Activity, 
@@ -21,9 +21,10 @@ import {
   Plus,
   Trash2
 } from 'lucide-react';
-import { Visit, Patient, Vitals, History, Encounter, UserProfile, InventoryItem } from '../types';
+import { Visit, Patient, Vitals, History, Encounter, InventoryItem } from '../types';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
+import { useAuth } from '../context/AuthContext';
 
 const steps = [
   { id: 'vitals', label: 'Vitals', icon: Activity },
@@ -35,11 +36,11 @@ const steps = [
 const VisitWorkflow: React.FC = () => {
   const { visitId } = useParams<{ visitId: string }>();
   const navigate = useNavigate();
+  const { profile } = useAuth();
   const [visit, setVisit] = useState<Visit | null>(null);
   const [patient, setPatient] = useState<Patient | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [user, setUser] = useState<UserProfile | null>(null);
   const [activeStep, setActiveStep] = useState<string>('vitals');
   const [drugs, setDrugs] = useState<InventoryItem[]>([]);
 
@@ -51,12 +52,23 @@ const VisitWorkflow: React.FC = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!visitId) return;
+      if (!visitId || !profile?.clinicId) {
+        if (profile) setLoading(false);
+        return;
+      }
 
       try {
+        const clinicId = profile.clinicId;
         const visitDoc = await getDoc(doc(db, 'visits', visitId));
         if (visitDoc.exists()) {
           const visitData = { id: visitDoc.id, ...visitDoc.data() } as Visit;
+          
+          // Verify clinicId
+          if (visitData.clinicId !== clinicId) {
+            navigate('/patients');
+            return;
+          }
+
           setVisit(visitData);
           
           // Set active step based on status
@@ -83,37 +95,31 @@ const VisitWorkflow: React.FC = () => {
           }
 
           // Fetch drugs for billing/prescriptions
-          const drugsSnapshot = await getDocs(query(collection(db, 'inventory'), where('type', '==', 'drug')));
+          const drugsSnapshot = await getDocs(query(collection(db, 'inventory'), where('clinicId', '==', clinicId), where('type', '==', 'drug')));
           setDrugs(drugsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
         } else {
           navigate('/patients');
         }
-
-        if (auth.currentUser) {
-          const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-          if (userDoc.exists()) {
-            setUser(userDoc.data() as UserProfile);
-          }
-        }
       } catch (error) {
-        console.error('Error fetching visit data:', error);
+        handleFirestoreError(error, OperationType.GET, `visits/${visitId}`);
       } finally {
         setLoading(false);
       }
     };
 
     fetchData();
-  }, [visitId, navigate]);
+  }, [visitId, navigate, profile?.clinicId]);
 
   const handleSaveVitals = async () => {
-    if (!visitId || !user) return;
+    if (!visitId || !profile) return;
     setSaving(true);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       const vitalsData = {
         ...vitalsForm,
-        recordedBy: user.displayName || user.email,
-        recordedAt: new Date().toISOString()
+        recordedBy: profile.displayName || profile.email,
+        recordedAt: new Date().toISOString(),
+        clinicId
       };
 
       const updateData: any = { vitals: vitalsData };
@@ -127,13 +133,13 @@ const VisitWorkflow: React.FC = () => {
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'SAVE_VITALS',
         module: 'EMR',
         details: `Recorded vitals for visit ${visitId}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
 
       setVisit(prev => prev ? { ...prev, vitals: vitalsData as Vitals, status: 'history' } : null);
@@ -147,14 +153,15 @@ const VisitWorkflow: React.FC = () => {
   };
 
   const handleSaveHistory = async () => {
-    if (!visitId || !user) return;
+    if (!visitId || !profile) return;
     setSaving(true);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       const historyData = {
         ...historyForm,
-        recordedBy: user.displayName || user.email,
-        recordedAt: new Date().toISOString()
+        recordedBy: profile.displayName || profile.email,
+        recordedAt: new Date().toISOString(),
+        clinicId
       };
 
       const updateData: any = { history: historyData };
@@ -168,13 +175,13 @@ const VisitWorkflow: React.FC = () => {
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'SAVE_HISTORY',
         module: 'EMR',
         details: `Recorded history for visit ${visitId}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
 
       setVisit(prev => prev ? { ...prev, history: historyData as History, status: 'encounter' } : null);
@@ -188,14 +195,15 @@ const VisitWorkflow: React.FC = () => {
   };
 
   const handleSaveEncounter = async () => {
-    if (!visitId || !user) return;
+    if (!visitId || !profile) return;
     setSaving(true);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       const encounterData = {
         ...encounterForm,
-        doctorId: user.uid,
-        recordedAt: new Date().toISOString()
+        doctorId: profile.uid,
+        recordedAt: new Date().toISOString(),
+        clinicId
       };
 
       const updateData: any = { encounter: encounterData };
@@ -209,13 +217,13 @@ const VisitWorkflow: React.FC = () => {
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'SAVE_ENCOUNTER',
         module: 'EMR',
         details: `Recorded encounter for visit ${visitId}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
 
       setVisit(prev => prev ? { ...prev, encounter: encounterData as Encounter, status: 'billing' } : null);
@@ -229,10 +237,10 @@ const VisitWorkflow: React.FC = () => {
   };
 
   const handleSaveBilling = async () => {
-    if (!visitId || !patient || !user) return;
+    if (!visitId || !patient || !profile) return;
     setSaving(true);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       const subtotal = billingItems.reduce((sum, item) => sum + item.total, 0);
       const tax = subtotal * 0; // No tax for now
       const total = subtotal + tax;
@@ -245,7 +253,7 @@ const VisitWorkflow: React.FC = () => {
         tax,
         total,
         status: 'unpaid',
-        facilityId,
+        clinicId,
         createdAt: serverTimestamp()
       });
 
@@ -255,13 +263,13 @@ const VisitWorkflow: React.FC = () => {
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'COMPLETE_VISIT',
         module: 'Billing',
         details: `Completed visit ${visitId} and generated invoice for KES ${total}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
 
       navigate(`/patients/${patient.id}`);

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, auth } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, getDocs, limit, orderBy, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { 
   Users, 
@@ -14,102 +14,122 @@ import {
   PlusCircle,
   ChevronRight
 } from 'lucide-react';
-import { Patient, Visit, InventoryItem, UserProfile } from '../types';
+import { Patient, Visit, InventoryItem, Clinic } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 const Dashboard: React.FC = () => {
+  const { profile } = useAuth();
   const [stats, setStats] = useState({
     totalPatients: 0,
     visitsToday: 0,
     lowStockDrugs: 0,
     pendingAppointments: 0
   });
+  const [clinicStats, setClinicStats] = useState<{ [key: string]: any }>({});
+  const [clinics, setClinics] = useState<Clinic[]>([]);
   const [recentVisits, setRecentVisits] = useState<Visit[]>([]);
   const [queue, setQueue] = useState<(Visit & { patientName?: string })[]>([]);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    const bootstrapAdmin = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          
-          // Start real-time listeners with facility filtering
-          const facilityId = userData.facilityId || 'main-branch';
-          
-          const patientsUnsub = onSnapshot(query(collection(db, 'patients'), where('facilityId', '==', facilityId)), (snapshot) => {
-            setStats(prev => ({ ...prev, totalPatients: snapshot.size }));
-          });
+    if (!profile?.clinicId) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
+    const clinicId = profile.clinicId;
 
-          const visitsUnsub = onSnapshot(
-            query(collection(db, 'visits'), where('facilityId', '==', facilityId), where('date', '>=', today.toISOString())),
-            (snapshot) => {
-              setStats(prev => ({ ...prev, visitsToday: snapshot.size }));
-            }
-          );
+    // Load all clinics if admin
+    if (profile.role === 'admin') {
+      const clinicsUnsub = onSnapshot(collection(db, 'clinics'), (snapshot) => {
+        const clinicsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Clinic));
+        setClinics(clinicsData);
+      });
 
-          const drugsUnsub = onSnapshot(query(collection(db, 'inventory'), where('facilityId', '==', facilityId), where('type', '==', 'drug')), (snapshot) => {
-            const lowStock = snapshot.docs.filter(doc => {
-              const drug = doc.data() as InventoryItem;
-              return drug.stockQuantity <= drug.reorderLevel;
-            }).length;
-            setStats(prev => ({ ...prev, lowStockDrugs: lowStock }));
-          });
+      // Aggregate stats across all clinics (simplified for demo)
+      // In a real app, you'd use a cloud function or aggregate queries
+    }
+    
+    const patientsUnsub = onSnapshot(query(collection(db, 'patients'), where('clinicId', '==', clinicId)), (snapshot) => {
+      setStats(prev => ({ ...prev, totalPatients: snapshot.size }));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'patients');
+    });
 
-          const recentVisitsUnsub = onSnapshot(
-            query(collection(db, 'visits'), where('facilityId', '==', facilityId), orderBy('date', 'desc'), limit(5)),
-            (snapshot) => {
-              setRecentVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
-              setLoading(false);
-            }
-          );
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-          const queueUnsub = onSnapshot(
-            query(
-              collection(db, 'visits'), 
-              where('facilityId', '==', facilityId), 
-              where('status', 'in', ['checked-in', 'vitals', 'history', 'encounter']),
-              orderBy('date', 'asc')
-            ),
-            async (snapshot) => {
-              const queueData = await Promise.all(snapshot.docs.map(async (vDoc) => {
-                const visit = { id: vDoc.id, ...vDoc.data() } as Visit;
-                const pDoc = await getDoc(doc(db, 'patients', visit.patientId));
-                return { ...visit, patientName: pDoc.exists() ? pDoc.data().fullName : 'Unknown' };
-              }));
-              setQueue(queueData);
-            }
-          );
-
-          const appointmentsUnsub = onSnapshot(
-            query(collection(db, 'visits'), where('facilityId', '==', facilityId), where('status', '==', 'scheduled')),
-            (snapshot) => {
-              setStats(prev => ({ ...prev, pendingAppointments: snapshot.size }));
-            }
-          );
-
-          return () => {
-            patientsUnsub();
-            visitsUnsub();
-            drugsUnsub();
-            recentVisitsUnsub();
-            queueUnsub();
-            appointmentsUnsub();
-          };
-        }
+    const visitsUnsub = onSnapshot(
+      query(collection(db, 'visits'), where('clinicId', '==', clinicId), where('date', '>=', today.toISOString())),
+      (snapshot) => {
+        setStats(prev => ({ ...prev, visitsToday: snapshot.size }));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'visits');
       }
+    );
+
+    const drugsUnsub = onSnapshot(query(collection(db, 'inventory'), where('clinicId', '==', clinicId), where('type', '==', 'drug')), (snapshot) => {
+      const lowStock = snapshot.docs.filter(doc => {
+        const drug = doc.data() as InventoryItem;
+        return drug.stockQuantity <= drug.reorderLevel;
+      }).length;
+      setStats(prev => ({ ...prev, lowStockDrugs: lowStock }));
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'inventory');
+    });
+
+    const recentVisitsUnsub = onSnapshot(
+      query(collection(db, 'visits'), where('clinicId', '==', clinicId), orderBy('date', 'desc'), limit(5)),
+      (snapshot) => {
+        setRecentVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+        setLoading(false);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'visits');
+        setLoading(false);
+      }
+    );
+
+    const queueUnsub = onSnapshot(
+      query(
+        collection(db, 'visits'), 
+        where('clinicId', '==', clinicId), 
+        where('status', 'in', ['checked-in', 'vitals', 'history', 'encounter']),
+        orderBy('date', 'asc')
+      ),
+      async (snapshot) => {
+        const queueData = await Promise.all(snapshot.docs.map(async (vDoc) => {
+          const visit = { id: vDoc.id, ...vDoc.data() } as Visit;
+          const pDoc = await getDoc(doc(db, 'patients', visit.patientId));
+          return { ...visit, patientName: pDoc.exists() ? pDoc.data().fullName : 'Unknown' };
+        }));
+        setQueue(queueData);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'visits');
+      }
+    );
+
+    const appointmentsUnsub = onSnapshot(
+      query(collection(db, 'visits'), where('clinicId', '==', clinicId), where('status', '==', 'scheduled')),
+      (snapshot) => {
+        setStats(prev => ({ ...prev, pendingAppointments: snapshot.size }));
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'visits');
+      }
+    );
+
+    return () => {
+      patientsUnsub();
+      visitsUnsub();
+      drugsUnsub();
+      recentVisitsUnsub();
+      queueUnsub();
+      appointmentsUnsub();
     };
-    bootstrapAdmin();
-  }, []);
+  }, [profile?.clinicId]);
 
   const statCards = [
     { name: 'Total Patients', value: stats.totalPatients, icon: Users, color: 'bg-blue-500', trend: '+12% from last month' },
@@ -122,7 +142,7 @@ const Dashboard: React.FC = () => {
     <div className="space-y-8 transition-colors duration-200">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome back, {user?.fullName || 'Staff'}</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Welcome back, {profile?.fullName || 'Staff'}</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-1">Here's what's happening at AfyaClinic today.</p>
         </div>
         
@@ -179,6 +199,48 @@ const Dashboard: React.FC = () => {
           </div>
         ))}
       </div>
+
+      {/* Multi-Clinic Overview (Admin Only) */}
+      {profile?.role === 'admin' && clinics.length > 1 && (
+        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Multi-Clinic Overview</h2>
+            <button 
+              onClick={() => navigate('/clinics')}
+              className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              Manage Clinics
+            </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {clinics.map(clinic => (
+              <div 
+                key={clinic.id} 
+                className={cn(
+                  "p-4 rounded-xl border transition-all cursor-pointer",
+                  profile.clinicId === clinic.id 
+                    ? "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800" 
+                    : "bg-gray-50 dark:bg-gray-700/50 border-gray-100 dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-800"
+                )}
+                onClick={() => navigate('/clinics')}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-bold text-gray-900 dark:text-white truncate pr-2">{clinic.name}</span>
+                  <span className={cn(
+                    "px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                    clinic.status === 'active' ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+                  )}>
+                    {clinic.status}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-[10px] text-gray-500 dark:text-gray-400 font-bold uppercase tracking-widest">
+                  <span>{clinic.id}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Live Queue */}

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, deleteDoc, where } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, deleteDoc, where, limit, startAfter, getDocs, QueryDocumentSnapshot } from 'firebase/firestore';
 import { 
   Package, 
   Search, 
@@ -19,22 +19,28 @@ import {
   Layers,
   Box
 } from 'lucide-react';
-import { InventoryItem, UserProfile } from '../types';
+import { InventoryItem } from '../types';
 import { format, isPast, isWithinInterval, addMonths } from 'date-fns';
 import { cn } from '../lib/utils';
-import { auth } from '../firebase';
-import { getDoc } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 
 const Inventory: React.FC = () => {
+  const { profile } = useAuth();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'drug' | 'equipment' | 'other'>('all');
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isGlobalSearch, setIsGlobalSearch] = useState(false);
+
+  const PAGE_SIZE = 20;
 
   const [formData, setFormData] = useState({
     name: '',
@@ -53,28 +59,76 @@ const Inventory: React.FC = () => {
   });
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId && !isGlobalSearch) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const inventoryUnsub = onSnapshot(
-            query(collection(db, 'inventory'), where('facilityId', '==', facilityId), orderBy('name', 'asc')), 
-            (snapshot) => {
-              setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
-              setLoading(false);
-            }
-          );
+    setLoading(true);
+    let q;
+    if (isGlobalSearch && profile?.role === 'admin') {
+      q = query(
+        collection(db, 'inventory'),
+        orderBy('name', 'asc'),
+        limit(PAGE_SIZE)
+      );
+    } else {
+      q = query(
+        collection(db, 'inventory'), 
+        where('clinicId', '==', profile?.clinicId), 
+        orderBy('name', 'asc'),
+        limit(PAGE_SIZE)
+      );
+    }
 
-          return () => inventoryUnsub();
-        }
+    const inventoryUnsub = onSnapshot(q, (snapshot) => {
+      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any } as InventoryItem)));
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+      setLoading(false);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'inventory');
+      setLoading(false);
+    });
+
+    return () => inventoryUnsub();
+  }, [profile?.clinicId, isGlobalSearch]);
+
+  const loadMore = async () => {
+    if ((!profile?.clinicId && !isGlobalSearch) || !lastDoc || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      let q;
+      if (isGlobalSearch && profile?.role === 'admin') {
+        q = query(
+          collection(db, 'inventory'),
+          orderBy('name', 'asc'),
+          startAfter(lastDoc),
+          limit(PAGE_SIZE)
+        );
+      } else {
+        q = query(
+          collection(db, 'inventory'),
+          where('clinicId', '==', profile?.clinicId),
+          orderBy('name', 'asc'),
+          startAfter(lastDoc),
+          limit(PAGE_SIZE)
+        );
       }
-    };
-    bootstrap();
-  }, []);
+
+      const snapshot = await getDocs(q);
+      const newItems = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any } as InventoryItem));
+      
+      setItems(prev => [...prev, ...newItems]);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'inventory');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const filteredItems = items.filter(item => {
     const matchesSearch = item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -86,47 +140,69 @@ const Inventory: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!profile) return;
     setSubmitting(true);
+    setError(null);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
+      if (!clinicId) {
+        throw new Error('No clinic selected. Please select a clinic from the sidebar or contact an administrator.');
+      }
       if (editingItem) {
-        await updateDoc(doc(db, 'inventory', editingItem.id), {
-          ...formData,
-          updatedAt: serverTimestamp()
-        });
+        try {
+          await updateDoc(doc(db, 'inventory', editingItem.id), {
+            ...formData,
+            updatedAt: serverTimestamp()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `inventory/${editingItem.id}`);
+        }
 
         // Audit Log
-        await addDoc(collection(db, 'audit_logs'), {
-          userId: user.uid,
-          userEmail: user.email,
-          action: 'UPDATE_INVENTORY',
-          module: 'Inventory',
-          details: `Updated item: ${formData.name}`,
-          timestamp: serverTimestamp(),
-          facilityId
-        });
+        try {
+          await addDoc(collection(db, 'audit_logs'), {
+            userId: profile.uid,
+            userEmail: profile.email,
+            action: 'UPDATE_INVENTORY',
+            module: 'Inventory',
+            details: `Updated item: ${formData.name} (${editingItem.id})`,
+            timestamp: serverTimestamp(),
+            clinicId
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, 'audit_logs');
+        }
       } else {
-        await addDoc(collection(db, 'inventory'), {
-          ...formData,
-          facilityId,
-          createdAt: serverTimestamp()
-        });
+        let itemRef;
+        try {
+          itemRef = await addDoc(collection(db, 'inventory'), {
+            ...formData,
+            clinicId,
+            createdAt: serverTimestamp()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, 'inventory');
+        }
 
         // Audit Log
-        await addDoc(collection(db, 'audit_logs'), {
-          userId: user.uid,
-          userEmail: user.email,
-          action: 'ADD_INVENTORY',
-          module: 'Inventory',
-          details: `Added new item: ${formData.name}`,
-          timestamp: serverTimestamp(),
-          facilityId
-        });
+        try {
+          await addDoc(collection(db, 'audit_logs'), {
+            userId: profile.uid,
+            userEmail: profile.email,
+            action: 'ADD_INVENTORY',
+            module: 'Inventory',
+            details: `Added new item: ${formData.name} (${itemRef?.id})`,
+            timestamp: serverTimestamp(),
+            clinicId
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, 'audit_logs');
+        }
       }
       handleCloseModal();
-    } catch (error) {
-      console.error('Error saving inventory item:', error);
+    } catch (err: any) {
+      console.error('Error saving inventory item:', err);
+      setError(err.message || 'Failed to save inventory item. Please check your permissions.');
     } finally {
       setSubmitting(false);
     }
@@ -293,10 +369,20 @@ const Inventory: React.FC = () => {
               className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
             />
           </div>
-          <button className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all">
-            <Filter className="w-4 h-4" />
-            Filters
-          </button>
+          {profile?.role === 'admin' && (
+            <button 
+              onClick={() => setIsGlobalSearch(!isGlobalSearch)}
+              className={cn(
+                "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border",
+                isGlobalSearch 
+                  ? "bg-blue-600 text-white border-blue-600" 
+                  : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"
+              )}
+            >
+              <Filter className="w-4 h-4" />
+              {isGlobalSearch ? 'Global Search: ON' : 'Global Search: OFF'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -313,6 +399,9 @@ const Inventory: React.FC = () => {
                 <tr className="bg-gray-50 border-b border-gray-100">
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Item Details</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Batch & Expiry</th>
+                  {isGlobalSearch && (
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Clinic</th>
+                  )}
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Stock Status</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Supplier</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 uppercase tracking-wider">Pricing (KES)</th>
@@ -360,6 +449,13 @@ const Inventory: React.FC = () => {
                           )}
                         </div>
                       </td>
+                      {isGlobalSearch && (
+                        <td className="px-6 py-4">
+                          <span className="px-2 py-1 bg-gray-100 rounded text-[10px] font-bold text-gray-600 uppercase tracking-wider">
+                            {item.clinicId}
+                          </span>
+                        </td>
+                      )}
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           <span className={cn(
@@ -405,6 +501,17 @@ const Inventory: React.FC = () => {
                 })}
               </tbody>
             </table>
+            {hasMore && (
+              <div className="p-4 border-t border-gray-100 flex justify-center">
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="px-6 py-2 bg-gray-50 text-gray-600 rounded-xl font-semibold hover:bg-gray-100 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load More Items'}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-12 text-center text-gray-500">
@@ -461,6 +568,12 @@ const Inventory: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 text-red-700 text-sm">
+                  <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <p>{error}</p>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-bold text-gray-700 mb-1">Item Name *</label>

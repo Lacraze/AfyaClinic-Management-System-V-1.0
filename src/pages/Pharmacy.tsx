@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, where } from 'firebase/firestore';
 import { 
   Pill, 
@@ -17,13 +17,13 @@ import {
   ArrowUpCircle,
   ClipboardList
 } from 'lucide-react';
-import { InventoryItem, Prescription, UserProfile } from '../types';
+import { InventoryItem, Prescription } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
-import { auth } from '../firebase';
-import { getDoc } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 
 const Pharmacy: React.FC = () => {
+  const { profile } = useAuth();
   const [drugs, setDrugs] = useState<InventoryItem[]>([]);
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -31,7 +31,6 @@ const Pharmacy: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'inventory' | 'prescriptions'>('inventory');
-  const [user, setUser] = useState<UserProfile | null>(null);
 
   // Form state for new drug
   const [formData, setFormData] = useState({
@@ -51,38 +50,40 @@ const Pharmacy: React.FC = () => {
   });
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const drugsUnsub = onSnapshot(
-            query(collection(db, 'inventory'), where('type', '==', 'drug'), where('facilityId', '==', facilityId), orderBy('name', 'asc')), 
-            (snapshot) => {
-              setDrugs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
-              setLoading(false);
-            }
-          );
+    const clinicId = profile.clinicId;
 
-          const prescriptionsUnsub = onSnapshot(
-            query(collection(db, 'prescriptions'), where('facilityId', '==', facilityId), orderBy('prescribedAt', 'desc')), 
-            (snapshot) => {
-              setPrescriptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription)));
-            }
-          );
-
-          return () => {
-            drugsUnsub();
-            prescriptionsUnsub();
-          };
-        }
+    const drugsUnsub = onSnapshot(
+      query(collection(db, 'inventory'), where('type', '==', 'drug'), where('clinicId', '==', clinicId), orderBy('name', 'asc')), 
+      (snapshot) => {
+        setDrugs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InventoryItem)));
+        setLoading(false);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'inventory');
+        setLoading(false);
       }
+    );
+
+    const prescriptionsUnsub = onSnapshot(
+      query(collection(db, 'prescriptions'), where('clinicId', '==', clinicId), orderBy('prescribedAt', 'desc')), 
+      (snapshot) => {
+        setPrescriptions(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Prescription)));
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'prescriptions');
+      }
+    );
+
+    return () => {
+      drugsUnsub();
+      prescriptionsUnsub();
     };
-    bootstrap();
-  }, []);
+  }, [profile?.clinicId]);
 
   const filteredDrugs = drugs.filter(d => 
     d.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -91,25 +92,28 @@ const Pharmacy: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!profile) return;
     setSubmitting(true);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
+      if (!clinicId) {
+        throw new Error('No clinic selected. Please select a clinic from the sidebar or contact an administrator.');
+      }
       const drugRef = await addDoc(collection(db, 'inventory'), {
         ...formData,
-        facilityId,
+        clinicId,
         createdAt: serverTimestamp()
       });
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'ADD_DRUG',
         module: 'Pharmacy',
-        details: `Added new drug: ${formData.name}`,
+        details: `Added new drug: ${formData.name} (${drugRef.id})`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
       setIsModalOpen(false);
       setFormData({
@@ -127,17 +131,18 @@ const Pharmacy: React.FC = () => {
         batchNumber: '',
         expiryDate: ''
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding drug:', error);
+      alert(error.message || 'Failed to add drug. Please check your permissions.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleDispense = async (prescription: Prescription) => {
-    if (!user) return;
+    if (!profile) return;
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       // Update prescription status
       await updateDoc(doc(db, 'prescriptions', prescription.id), {
         status: 'dispensed',
@@ -154,13 +159,13 @@ const Pharmacy: React.FC = () => {
 
         // Audit Log
         await addDoc(collection(db, 'audit_logs'), {
-          userId: user.uid,
-          userEmail: user.email,
+          userId: profile.uid,
+          userEmail: profile.email,
           action: 'DISPENSE_DRUG',
           module: 'Pharmacy',
           details: `Dispensed ${prescription.quantity} units of ${prescription.drugName} to patient ${prescription.patientId}`,
           timestamp: serverTimestamp(),
-          facilityId
+          clinicId
         });
       }
     } catch (error) {

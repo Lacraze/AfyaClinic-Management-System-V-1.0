@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { db, auth } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, orderBy, onSnapshot, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { 
   BarChart3, 
@@ -17,8 +17,10 @@ import {
 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, subMonths, isWithinInterval } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 const Reports: React.FC = () => {
+  const { profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [revenueData, setRevenueData] = useState<{ date: string; amount: number }[]>([]);
   const [visitStats, setVisitStats] = useState({ total: 0, completed: 0, cancelled: 0 });
@@ -26,42 +28,47 @@ const Reports: React.FC = () => {
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!auth.currentUser) return;
-      const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-      if (!userDoc.exists()) return;
-      const facilityId = userDoc.data().facilityId || 'main-branch';
+      if (!profile?.clinicId) {
+        if (profile) setLoading(false);
+        return;
+      }
+      const clinicId = profile.clinicId;
 
-      // Fetch payments for revenue
-      const paymentsSnap = await getDocs(query(collection(db, 'payments'), where('facilityId', '==', facilityId), orderBy('date', 'asc')));
-      const payments = paymentsSnap.docs.map(doc => doc.data());
-      
-      // Group by month
-      const grouped = payments.reduce((acc: any, p: any) => {
-        const month = format(new Date(p.date), 'MMM yyyy');
-        acc[month] = (acc[month] || 0) + p.amount;
-        return acc;
-      }, {});
+      try {
+        // Fetch payments for revenue
+        const paymentsSnap = await getDocs(query(collection(db, 'payments'), where('clinicId', '==', clinicId), orderBy('date', 'asc')));
+        const payments = paymentsSnap.docs.map(doc => doc.data());
+        
+        // Group by month
+        const grouped = payments.reduce((acc: any, p: any) => {
+          const month = format(new Date(p.date), 'MMM yyyy');
+          acc[month] = (acc[month] || 0) + p.amount;
+          return acc;
+        }, {});
 
-      setRevenueData(Object.entries(grouped).map(([date, amount]) => ({ date, amount: amount as number })));
+        setRevenueData(Object.entries(grouped).map(([date, amount]) => ({ date, amount: amount as number })));
 
-      // Fetch visits
-      const visitsSnap = await getDocs(query(collection(db, 'visits'), where('facilityId', '==', facilityId)));
-      const visits = visitsSnap.docs.map(doc => doc.data());
-      setVisitStats({
-        total: visits.length,
-        completed: visits.filter((v: any) => v.status === 'completed').length,
-        cancelled: visits.filter((v: any) => v.status === 'no-show').length
-      });
+        // Fetch visits
+        const visitsSnap = await getDocs(query(collection(db, 'visits'), where('clinicId', '==', clinicId)));
+        const visits = visitsSnap.docs.map(doc => doc.data());
+        setVisitStats({
+          total: visits.length,
+          completed: visits.filter((v: any) => v.status === 'completed').length,
+          cancelled: visits.filter((v: any) => v.status === 'no-show').length
+        });
 
-      // Patient growth (simple count for now)
-      const patientsSnap = await getDocs(query(collection(db, 'patients'), where('facilityId', '==', facilityId)));
-      setPatientGrowth(patientsSnap.size);
-
-      setLoading(false);
+        // Patient growth (simple count for now)
+        const patientsSnap = await getDocs(query(collection(db, 'patients'), where('clinicId', '==', clinicId)));
+        setPatientGrowth(patientsSnap.size);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.LIST, 'reports_data');
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchData();
-  }, []);
+  }, [profile?.clinicId]);
 
   if (loading) {
     return (

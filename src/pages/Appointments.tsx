@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, doc, updateDoc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, where, doc, updateDoc, limit, startAfter, getDocs, QueryDocumentSnapshot } from 'firebase/firestore';
 import { 
   Calendar, 
   Search, 
@@ -16,21 +16,26 @@ import {
   Bell,
   AlertCircle
 } from 'lucide-react';
-import { Visit, Patient, UserProfile } from '../types';
+import { Visit, Patient } from '../types';
 import { format, isToday, isTomorrow, isFuture, addMinutes } from 'date-fns';
 import { cn } from '../lib/utils';
-import { auth } from '../firebase';
-import { getDoc } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 
 const Appointments: React.FC = () => {
+  const { profile } = useAuth();
   const [visits, setVisits] = useState<Visit[]>([]);
   const [patients, setPatients] = useState<Patient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [conflict, setConflict] = useState<string | null>(null);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const navigate = useNavigate();
+
+  const PAGE_SIZE = 20;
 
   const [formData, setFormData] = useState({
     patientId: '',
@@ -40,46 +45,80 @@ const Appointments: React.FC = () => {
   });
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const visitsUnsub = onSnapshot(
-            query(collection(db, 'visits'), where('facilityId', '==', facilityId), orderBy('date', 'asc')), 
-            (snapshot) => {
-              setVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
-              setLoading(false);
-            }
-          );
-
-          const patientsUnsub = onSnapshot(
-            query(collection(db, 'patients'), where('facilityId', '==', facilityId)), 
-            (snapshot) => {
-              setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
-            }
-          );
-
-          return () => {
-            visitsUnsub();
-            patientsUnsub();
-          };
-        }
+    const visitsUnsub = onSnapshot(
+      query(
+        collection(db, 'visits'), 
+        where('clinicId', '==', profile.clinicId), 
+        orderBy('date', 'asc'),
+        limit(PAGE_SIZE)
+      ), 
+      (snapshot) => {
+        setVisits(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit)));
+        setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+        setHasMore(snapshot.docs.length === PAGE_SIZE);
+        setLoading(false);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'visits');
+        setLoading(false);
       }
+    );
+
+    const patientsUnsub = onSnapshot(
+      query(collection(db, 'patients'), where('clinicId', '==', profile.clinicId)), 
+      (snapshot) => {
+        setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'patients');
+      }
+    );
+
+    return () => {
+      visitsUnsub();
+      patientsUnsub();
     };
-    bootstrap();
-  }, []);
+  }, [profile?.clinicId]);
+
+  const loadMore = async () => {
+    if (!profile?.clinicId || !lastDoc || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const q = query(
+        collection(db, 'visits'),
+        where('clinicId', '==', profile.clinicId),
+        orderBy('date', 'asc'),
+        startAfter(lastDoc),
+        limit(PAGE_SIZE)
+      );
+
+      const snapshot = await getDocs(q);
+      const newVisits = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Visit));
+      
+      setVisits(prev => [...prev, ...newVisits]);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'visits');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!profile) return;
     setSubmitting(true);
     setConflict(null);
+    setError(null);
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       const appointmentDate = new Date(`${formData.date}T${formData.time}`);
       
       // Basic Conflict Check
@@ -95,50 +134,60 @@ const Appointments: React.FC = () => {
         return;
       }
 
-      const visitRef = await addDoc(collection(db, 'visits'), {
-        patientId: formData.patientId,
-        date: appointmentDate.toISOString(),
-        status: 'scheduled',
-        notes: formData.notes,
-        facilityId,
-        createdAt: serverTimestamp()
-      });
+      let visitRef;
+      try {
+        visitRef = await addDoc(collection(db, 'visits'), {
+          patientId: formData.patientId,
+          date: appointmentDate.toISOString(),
+          status: 'scheduled',
+          notes: formData.notes,
+          clinicId,
+          createdAt: serverTimestamp()
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, 'visits');
+      }
 
       // Audit Log
-      await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
-        action: 'SCHEDULE_APPOINTMENT',
-        module: 'Appointments',
-        details: `Scheduled appointment for patient ${formData.patientId} on ${formData.date} at ${formData.time}`,
-        timestamp: serverTimestamp(),
-        facilityId
-      });
+      try {
+        await addDoc(collection(db, 'audit_logs'), {
+          userId: profile.uid,
+          userEmail: profile.email,
+          action: 'SCHEDULE_APPOINTMENT',
+          module: 'Appointments',
+          details: `Scheduled appointment for patient ${formData.patientId} on ${formData.date} at ${formData.time}`,
+          timestamp: serverTimestamp(),
+          clinicId
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.CREATE, 'audit_logs');
+      }
 
       setIsModalOpen(false);
       setFormData({ patientId: '', date: '', time: '', notes: '' });
-    } catch (error) {
-      console.error('Error scheduling appointment:', error);
+    } catch (err: any) {
+      console.error('Error scheduling appointment:', err);
+      setError(err.message || 'Failed to schedule appointment. Please check your permissions.');
     } finally {
       setSubmitting(false);
     }
   };
 
   const updateStatus = async (visitId: string, status: Visit['status']) => {
-    if (!user) return;
+    if (!profile) return;
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       await updateDoc(doc(db, 'visits', visitId), { status });
 
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'UPDATE_APPOINTMENT_STATUS',
         module: 'Appointments',
         details: `Updated appointment ${visitId} status to ${status}`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
       if (status === 'vitals') {
         navigate(`/visits/${visitId}/workflow`);
@@ -149,9 +198,9 @@ const Appointments: React.FC = () => {
   };
 
   const handleSendReminder = async (visit: Visit) => {
-    if (!user) return;
+    if (!profile) return;
     try {
-      const facilityId = user.facilityId || 'main-branch';
+      const clinicId = profile.clinicId;
       const patientName = getPatientName(visit.patientId);
       
       // In a real app, this would trigger an SMS/Email/WhatsApp API
@@ -159,13 +208,13 @@ const Appointments: React.FC = () => {
       
       // Audit Log
       await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
+        userId: profile.uid,
+        userEmail: profile.email,
         action: 'SEND_REMINDER',
         module: 'Appointments',
         details: `Sent appointment reminder to ${patientName} (${visit.patientId})`,
         timestamp: serverTimestamp(),
-        facilityId
+        clinicId
       });
 
       alert(`Reminder sent to ${patientName}!`);
@@ -254,6 +303,17 @@ const Appointments: React.FC = () => {
                 <p>No upcoming appointments found.</p>
               </div>
             )}
+            {hasMore && (
+              <div className="p-4 border-t border-gray-100 flex justify-center">
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="px-6 py-2 bg-gray-50 text-gray-600 rounded-xl font-semibold hover:bg-gray-100 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load More Appointments'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -298,6 +358,12 @@ const Appointments: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
+              {error && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-700 text-sm">
+                  <AlertCircle className="w-4 h-4" />
+                  {error}
+                </div>
+              )}
               {conflict && (
                 <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2 text-red-700 text-sm">
                   <AlertCircle className="w-4 h-4" />

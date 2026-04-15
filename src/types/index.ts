@@ -8,8 +8,20 @@ export interface UserProfile {
   role: UserRole;
   status: 'active' | 'inactive';
   phoneNumber?: string;
-  facilityId: string;
+  clinicId: string;
   createdAt: string;
+}
+
+export interface Clinic {
+  id: string;
+  name: string;
+  address: string;
+  phoneNumber: string;
+  email: string;
+  status: 'active' | 'inactive';
+  createdAt: string;
+  logoUrl?: string;
+  website?: string;
 }
 
 export interface Patient {
@@ -23,7 +35,7 @@ export interface Patient {
   nextOfKin: string;
   insuranceProvider?: string;
   insuranceNumber?: string;
-  facilityId: string;
+  clinicId: string;
   createdAt: string;
 }
 
@@ -37,6 +49,7 @@ export interface Vitals {
   painScore: number;
   recordedBy: string;
   recordedAt: string;
+  clinicId: string;
 }
 
 export interface History {
@@ -47,6 +60,7 @@ export interface History {
   familyHistory: string;
   recordedBy: string;
   recordedAt: string;
+  clinicId: string;
 }
 
 export interface Encounter {
@@ -55,6 +69,7 @@ export interface Encounter {
   plan: string;
   doctorId: string;
   recordedAt: string;
+  clinicId: string;
 }
 
 export interface Visit {
@@ -62,7 +77,7 @@ export interface Visit {
   patientId: string;
   date: string;
   status: 'scheduled' | 'checked-in' | 'vitals' | 'history' | 'encounter' | 'billing' | 'completed' | 'no-show';
-  facilityId: string;
+  clinicId: string;
   vitals?: Vitals;
   history?: History;
   encounter?: Encounter;
@@ -83,6 +98,7 @@ export interface InventoryItem {
   buyingPrice: number;
   sellingPrice: number;
   unit?: string;
+  clinicId: string;
 }
 
 export interface Prescription {
@@ -101,6 +117,7 @@ export interface Prescription {
   status: 'pending' | 'dispensed' | 'cancelled';
   prescribedBy: string;
   prescribedAt: string;
+  clinicId: string;
 }
 
 export interface InvoiceItem {
@@ -120,6 +137,7 @@ export interface Invoice {
   total: number;
   status: 'unpaid' | 'partially-paid' | 'paid';
   createdAt: string;
+  clinicId: string;
 }
 
 export interface Payment {
@@ -129,6 +147,7 @@ export interface Payment {
   method: 'cash' | 'mpesa' | 'card' | 'insurance';
   reference?: string;
   date: string;
+  clinicId: string;
 }
 
 export interface Utility {
@@ -138,6 +157,7 @@ export interface Utility {
   dueDate: string;
   status: 'unpaid' | 'paid';
   notes?: string;
+  clinicId: string;
 }
 
 export interface Attendance {
@@ -146,6 +166,7 @@ export interface Attendance {
   date: string;
   clockIn: string;
   clockOut?: string;
+  clinicId: string;
 }
 
 export interface AuditLog {
@@ -156,7 +177,7 @@ export interface AuditLog {
   module: string;
   details: string;
   timestamp: string;
-  facilityId: string;
+  clinicId: string;
 }
 
 export interface Appointment {
@@ -169,6 +190,6 @@ export interface Appointment {
   time: string;
   duration: number; // in minutes
   status: 'scheduled' | 'confirmed' | 'cancelled' | 'completed';
-  facilityId: string;
+  clinicId: string;
   notes?: string;
 }

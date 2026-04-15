@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { db, auth } from '../firebase';
-import { collection, query, orderBy, onSnapshot, where, getDoc, doc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { collection, query, orderBy, onSnapshot, where, limit, startAfter, getDocs, QueryDocumentSnapshot } from 'firebase/firestore';
 import { 
   Shield, 
   Search, 
@@ -10,42 +10,73 @@ import {
   Filter,
   Loader2
 } from 'lucide-react';
-import { AuditLog, UserProfile } from '../types';
+import { AuditLog } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 const AuditLogs: React.FC = () => {
+  const { profile } = useAuth();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+
+  const PAGE_SIZE = 50;
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const q = query(
-            collection(db, 'audit_logs'), 
-            where('facilityId', '==', facilityId),
-            orderBy('timestamp', 'desc')
-          );
-          
-          const unsubscribe = onSnapshot(q, (snapshot) => {
-            setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AuditLog)));
-            setLoading(false);
-          });
+    const q = query(
+      collection(db, 'audit_logs'), 
+      where('clinicId', '==', profile.clinicId),
+      orderBy('timestamp', 'desc'),
+      limit(PAGE_SIZE)
+    );
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setLogs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AuditLog)));
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+      setLoading(false);
+    }, (error) => {
+      console.error("Error fetching audit logs:", error);
+      setLoading(false);
+    });
 
-          return () => unsubscribe();
-        }
-      }
-    };
-    bootstrap();
-  }, []);
+    return () => unsubscribe();
+  }, [profile?.clinicId]);
+
+  const loadMore = async () => {
+    if (!profile?.clinicId || !lastDoc || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      const q = query(
+        collection(db, 'audit_logs'),
+        where('clinicId', '==', profile.clinicId),
+        orderBy('timestamp', 'desc'),
+        startAfter(lastDoc),
+        limit(PAGE_SIZE)
+      );
+
+      const snapshot = await getDocs(q);
+      const newLogs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as AuditLog));
+      
+      setLogs(prev => [...prev, ...newLogs]);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+    } catch (error) {
+      console.error("Error loading more audit logs:", error);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const filteredLogs = logs.filter(log => 
     log.userEmail.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -145,6 +176,17 @@ const AuditLogs: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            {hasMore && (
+              <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex justify-center">
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="px-6 py-2 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-xl font-semibold hover:bg-gray-100 dark:hover:bg-gray-600 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load More Logs'}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-12 text-center text-gray-500 dark:text-gray-400">

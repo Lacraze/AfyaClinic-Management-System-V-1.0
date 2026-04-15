@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../firebase';
-import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, where } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, addDoc, query, orderBy, onSnapshot, serverTimestamp, where, limit, startAfter, getDocs, QueryDocumentSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { 
   Users, 
   Search, 
@@ -14,23 +14,31 @@ import {
   X,
   Loader2,
   Filter,
-  CheckCircle2
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react';
-import { Patient, UserProfile } from '../types';
+import { Patient } from '../types';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { auth } from '../firebase';
-import { getDoc, doc } from 'firebase/firestore';
+import { useAuth } from '../context/AuthContext';
 
 const Patients: React.FC = () => {
+  const { profile } = useAuth();
   const [patients, setPatients] = useState<Patient[]>([]);
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [lastDoc, setLastDoc] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [isGlobalSearch, setIsGlobalSearch] = useState(false);
   const navigate = useNavigate();
+
+  const PAGE_SIZE = 20;
 
   // Form state
   const [formData, setFormData] = useState({
@@ -46,26 +54,77 @@ const Patients: React.FC = () => {
   });
 
   useEffect(() => {
-    const bootstrap = async () => {
-      if (auth.currentUser) {
-        const userDoc = await getDoc(doc(db, 'users', auth.currentUser.uid));
-        if (userDoc.exists()) {
-          const userData = userDoc.data() as UserProfile;
-          setUser(userData);
-          const facilityId = userData.facilityId || 'main-branch';
+    if (!profile?.clinicId && !isGlobalSearch) {
+      if (profile) setLoading(false);
+      return;
+    }
 
-          const q = query(collection(db, 'patients'), where('facilityId', '==', facilityId), orderBy('createdAt', 'desc'));
-          const unsubscribe = onSnapshot(q, (snapshot) => {
-            setPatients(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Patient)));
-            setLoading(false);
-          });
+    setLoading(true);
+    let q;
+    if (isGlobalSearch && profile?.role === 'admin') {
+      q = query(
+        collection(db, 'patients'),
+        orderBy('createdAt', 'desc'),
+        limit(PAGE_SIZE)
+      );
+    } else {
+      q = query(
+        collection(db, 'patients'), 
+        where('clinicId', '==', profile?.clinicId), 
+        orderBy('createdAt', 'desc'),
+        limit(PAGE_SIZE)
+      );
+    }
 
-          return () => unsubscribe();
-        }
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const newPatients = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any } as Patient));
+      setPatients(newPatients);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+      setLoading(false);
+    }, (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'patients');
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [profile?.clinicId, isGlobalSearch]);
+
+  const loadMore = async () => {
+    if ((!profile?.clinicId && !isGlobalSearch) || !lastDoc || loadingMore) return;
+
+    setLoadingMore(true);
+    try {
+      let q;
+      if (isGlobalSearch && profile?.role === 'admin') {
+        q = query(
+          collection(db, 'patients'),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastDoc),
+          limit(PAGE_SIZE)
+        );
+      } else {
+        q = query(
+          collection(db, 'patients'),
+          where('clinicId', '==', profile?.clinicId),
+          orderBy('createdAt', 'desc'),
+          startAfter(lastDoc),
+          limit(PAGE_SIZE)
+        );
       }
-    };
-    bootstrap();
-  }, []);
+
+      const snapshot = await getDocs(q);
+      const newPatients = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() as any } as Patient));
+      
+      setPatients(prev => [...prev, ...newPatients]);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1] || null);
+      setHasMore(snapshot.docs.length === PAGE_SIZE);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, 'patients');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const filteredPatients = patients.filter(p => 
     p.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -74,30 +133,39 @@ const Patients: React.FC = () => {
   );
 
   const handleCheckIn = async (patient: Patient) => {
-    if (!user) return;
+    if (!profile) return;
     try {
-      const facilityId = user.facilityId || 'main-branch';
-      const visitRef = await addDoc(collection(db, 'visits'), {
-        patientId: patient.id,
-        date: new Date().toISOString(),
-        status: 'checked-in',
-        facilityId,
-        createdAt: serverTimestamp()
-      });
+      const clinicId = profile.clinicId;
+      let visitRef;
+      try {
+        visitRef = await addDoc(collection(db, 'visits'), {
+          patientId: patient.id,
+          date: new Date().toISOString(),
+          status: 'checked-in',
+          clinicId,
+          createdAt: serverTimestamp()
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'visits');
+      }
 
       // Audit Log
-      await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
-        action: 'CHECK_IN_PATIENT',
-        module: 'Patients',
-        details: `Checked in patient: ${patient.fullName} (${patient.id})`,
-        timestamp: serverTimestamp(),
-        facilityId
-      });
+      try {
+        await addDoc(collection(db, 'audit_logs'), {
+          userId: profile.uid,
+          userEmail: profile.email,
+          action: 'CHECK_IN_PATIENT',
+          module: 'Patients',
+          details: `Checked in patient: ${patient.fullName} (${patient.id})`,
+          timestamp: serverTimestamp(),
+          clinicId
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'audit_logs');
+      }
 
       alert(`${patient.fullName} checked in successfully!`);
-      navigate(`/visits/${visitRef.id}/workflow`);
+      if (visitRef) navigate(`/visits/${visitRef.id}/workflow`);
     } catch (error) {
       console.error('Error checking in patient:', error);
     }
@@ -105,27 +173,66 @@ const Patients: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return;
+    if (!profile) return;
     setSubmitting(true);
+    setError(null);
     try {
-      const facilityId = user.facilityId || 'main-branch';
-      const patientRef = await addDoc(collection(db, 'patients'), {
-        ...formData,
-        facilityId,
-        createdAt: serverTimestamp()
-      });
+      const clinicId = profile.clinicId;
+      if (!clinicId) {
+        throw new Error('No clinic selected. Please select a clinic from the sidebar or contact an administrator.');
+      }
+      if (editingPatient) {
+        try {
+          await updateDoc(doc(db, 'patients', editingPatient.id), {
+            ...formData,
+            updatedAt: serverTimestamp()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.UPDATE, `patients/${editingPatient.id}`);
+        }
 
-      // Audit Log
-      await addDoc(collection(db, 'audit_logs'), {
-        userId: user.uid,
-        userEmail: user.email,
-        action: 'REGISTER_PATIENT',
-        module: 'Patients',
-        details: `Registered patient: ${formData.fullName} (ID: ${formData.idNumber})`,
-        timestamp: serverTimestamp(),
-        facilityId
-      });
+        try {
+          await addDoc(collection(db, 'audit_logs'), {
+            userId: profile.uid,
+            userEmail: profile.email,
+            action: 'UPDATE_PATIENT',
+            module: 'Patients',
+            details: `Updated patient: ${formData.fullName} (${editingPatient.id})`,
+            timestamp: serverTimestamp(),
+            clinicId
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, 'audit_logs');
+        }
+      } else {
+        let patientRef;
+        try {
+          patientRef = await addDoc(collection(db, 'patients'), {
+            ...formData,
+            clinicId,
+            createdAt: serverTimestamp()
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, 'patients');
+        }
+
+        try {
+          await addDoc(collection(db, 'audit_logs'), {
+            userId: profile.uid,
+            userEmail: profile.email,
+            action: 'REGISTER_PATIENT',
+            module: 'Patients',
+            details: `Registered patient: ${formData.fullName} (ID: ${formData.idNumber})`,
+            timestamp: serverTimestamp(),
+            clinicId
+          });
+        } catch (err) {
+          handleFirestoreError(err, OperationType.CREATE, 'audit_logs');
+        }
+      }
+      
       setIsModalOpen(false);
+      setEditingPatient(null);
       setFormData({
         fullName: '',
         idNumber: '',
@@ -137,8 +244,9 @@ const Patients: React.FC = () => {
         insuranceProvider: '',
         insuranceNumber: ''
       });
-    } catch (error) {
-      console.error('Error adding patient:', error);
+    } catch (err: any) {
+      console.error('Error saving patient:', err);
+      setError(err.message || 'Failed to save patient. Please check your permissions.');
     } finally {
       setSubmitting(false);
     }
@@ -172,10 +280,20 @@ const Patients: React.FC = () => {
             className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all dark:text-white"
           />
         </div>
-        <button className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-all">
-          <Filter className="w-4 h-4" />
-          More Filters
-        </button>
+        {profile?.role === 'admin' && (
+          <button 
+            onClick={() => setIsGlobalSearch(!isGlobalSearch)}
+            className={cn(
+              "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all border",
+              isGlobalSearch 
+                ? "bg-blue-600 text-white border-blue-600" 
+                : "bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700"
+            )}
+          >
+            <Filter className="w-4 h-4" />
+            {isGlobalSearch ? 'Global Search: ON' : 'Global Search: OFF'}
+          </button>
+        )}
       </div>
 
       {/* Patient List */}
@@ -191,6 +309,9 @@ const Patients: React.FC = () => {
                 <tr className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-100 dark:border-gray-700">
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Patient Details</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Contact & ID</th>
+                  {isGlobalSearch && (
+                    <th className="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Clinic</th>
+                  )}
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Insurance</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Registered</th>
                   <th className="px-6 py-4 text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Actions</th>
@@ -219,6 +340,13 @@ const Patients: React.FC = () => {
                         <p className="text-xs text-gray-400 dark:text-gray-500">ID: {patient.idNumber}</p>
                       </div>
                     </td>
+                    {isGlobalSearch && (
+                      <td className="px-6 py-4">
+                        <span className="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded text-[10px] font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                          {patient.clinicId}
+                        </span>
+                      </td>
+                    )}
                     <td className="px-6 py-4">
                       {patient.insuranceProvider ? (
                         <div className="space-y-1">
@@ -256,6 +384,17 @@ const Patients: React.FC = () => {
                 ))}
               </tbody>
             </table>
+            {hasMore && (
+              <div className="p-4 border-t border-gray-100 dark:border-gray-700 flex justify-center">
+                <button
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  className="px-6 py-2 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-xl font-semibold hover:bg-gray-100 dark:hover:bg-gray-600 transition-all disabled:opacity-50 flex items-center gap-2"
+                >
+                  {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Load More Patients'}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-12 text-center text-gray-500 dark:text-gray-400">
@@ -278,6 +417,12 @@ const Patients: React.FC = () => {
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-6">
+              {error && (
+                <div className="p-4 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 text-red-700 text-sm">
+                  <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                  <p>{error}</p>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="sm:col-span-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full Name *</label>

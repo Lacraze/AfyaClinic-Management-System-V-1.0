@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc } from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType } from '../firebase';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, updateDoc, doc, where } from 'firebase/firestore';
 import { 
   Zap, 
   Plus, 
@@ -19,8 +19,10 @@ import {
 import { Utility } from '../types';
 import { format } from 'date-fns';
 import { cn } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
 
 const Utilities: React.FC = () => {
+  const { profile } = useAuth();
   const [utilities, setUtilities] = useState<Utility[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -35,19 +37,37 @@ const Utilities: React.FC = () => {
   });
 
   useEffect(() => {
-    const unsub = onSnapshot(query(collection(db, 'utilities'), orderBy('dueDate', 'desc')), (snapshot) => {
-      setUtilities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Utility)));
-      setLoading(false);
-    });
+    if (!profile?.clinicId) {
+      if (profile) setLoading(false);
+      return;
+    }
+
+    const unsub = onSnapshot(
+      query(
+        collection(db, 'utilities'), 
+        where('clinicId', '==', profile.clinicId),
+        orderBy('dueDate', 'desc')
+      ), 
+      (snapshot) => {
+        setUtilities(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Utility)));
+        setLoading(false);
+      },
+      (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'utilities');
+        setLoading(false);
+      }
+    );
     return () => unsub();
-  }, []);
+  }, [profile?.clinicId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!profile) return;
     setSubmitting(true);
     try {
       await addDoc(collection(db, 'utilities'), {
         ...formData,
+        clinicId: profile.clinicId,
         createdAt: serverTimestamp()
       });
       setIsModalOpen(false);
