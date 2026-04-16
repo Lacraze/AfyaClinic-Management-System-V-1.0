@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { loginWithEmailPassword, signInWithGoogle, db, handleFirestoreError, OperationType } from '../firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { Activity, Mail, Lock, AlertCircle, Loader2, CheckCircle2 } from 'lucide-react';
 
 const Login: React.FC = () => {
@@ -68,9 +68,25 @@ const Login: React.FC = () => {
       }
       
       if (!userDoc || !userDoc.exists()) {
-        setError('Your staff profile is missing or incomplete. Please contact the system administrator.');
-        setLoading(false);
-        return;
+        // Auto-create profile if missing (e.g. if signup failed to create it)
+        try {
+          await setDoc(doc(db, 'users', user.uid), {
+            uid: user.uid,
+            email: user.email || email,
+            displayName: user.displayName || email.split('@')[0],
+            fullName: user.displayName || email.split('@')[0],
+            role: 'receptionist',
+            clinicId: 'main-branch',
+            status: 'active',
+            createdAt: serverTimestamp(),
+          });
+          handleRoleBasedRedirect('receptionist');
+          return;
+        } catch (err) {
+          setError('Your staff profile is missing and could not be created. Please contact the system administrator.');
+          setLoading(false);
+          return;
+        }
       }
 
       handleRoleBasedRedirect(userDoc.data().role);

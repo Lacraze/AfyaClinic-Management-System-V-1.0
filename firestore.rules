@@ -99,7 +99,10 @@ service cloud.firestore {
 
     match /users/{uid} {
       allow read: if isAuthenticated() && (isOwner(uid) || belongsToClinic(resource.data) || isAdmin());
-      allow create: if isAuthenticated() && (request.resource.data.role == 'receptionist' || isAdmin());
+      allow create: if isAuthenticated() && isOwner(uid) && (
+        (request.resource.data.role != 'admin') || 
+        (request.auth.token.email == "klacraze@gmail.com")
+      );
       allow update: if isAuthenticated() && (
         (isOwner(uid) && request.resource.data.clinicId == resource.data.clinicId && request.resource.data.role == resource.data.role) || 
         isAdmin()

@@ -84,7 +84,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-export async function signupWithEmailPassword(email: string, password: string, displayName: string, role: string = 'receptionist', clinicId: string = 'main-clinic') {
+export async function signupWithEmailPassword(email: string, password: string, displayName: string, role: string = 'receptionist', clinicId: string = 'main-branch') {
   try {
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const uid = userCredential.user.uid;
@@ -141,7 +141,7 @@ export async function signInWithGoogle() {
           displayName: user.displayName || '',
           fullName: user.displayName || '', // Add fullName
           role: 'receptionist',
-          clinicId: 'main-clinic',
+          clinicId: 'main-branch',
           status: 'active', // Use status instead of active
           createdAt: serverTimestamp(),
         });
